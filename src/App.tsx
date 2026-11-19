@@ -73,7 +73,20 @@ export default function App() {
   const [cart, setCart] = useState<CartItem[]>(() => {
     try {
       const saved = localStorage.getItem('shoili_cart_v1');
-      return saved ? (JSON.parse(saved) as CartItem[]) : [];
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed)
+        ? parsed.filter(
+            (item): item is CartItem =>
+              Boolean(
+                item &&
+                  item.product &&
+                  typeof item.product.id === 'string' &&
+                  typeof item.product.price === 'number' &&
+                  typeof item.quantity === 'number'
+              )
+          )
+        : [];
     } catch {
       return [];
     }
@@ -168,16 +181,20 @@ export default function App() {
       doc(db, 'settings', 'store'),
       (snap) => {
         if (snap.exists()) {
-          const data = snap.data() as StoreSettings;
-          if (data.storeName === 'শৈলী স্টোর') {
+          const data = snap.data() as Partial<StoreSettings>;
+          const merged: StoreSettings = {
+            ...DEFAULT_STORE_SETTINGS,
+            ...data,
+          };
+          if (merged.storeName === 'শৈলী স্টোর') {
             setSettings({
-              ...data,
+              ...merged,
               storeName: 'Fashion Shop',
               standardDeliveryFee: 80,
               expressDeliveryFee: 120,
             });
           } else {
-            setSettings(data);
+            setSettings(merged);
           }
         }
       },

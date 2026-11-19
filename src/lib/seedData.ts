@@ -11,28 +11,35 @@ import {
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Category, Product, Review, StoreSettings } from '../types';
 
-export const HERO_IMAGE_URL = '/src/assets/images/hero_lifestyle_atelier_1795062469034.jpg';
+import heroAtelierImg from '../assets/images/hero_lifestyle_atelier_1795062469034.jpg';
+import productWirelessAudioImg from '../assets/images/product_wireless_audio_1795062468395.jpg';
+import productArtisanWatchImg from '../assets/images/product_artisan_watch_1795062468913.jpg';
+import productAmberFragranceImg from '../assets/images/product_amber_fragrance_1795062469027.jpg';
+import productCeramicLampImg from '../assets/images/product_ceramic_lamp_1795062468114.jpg';
+import productLeatherToteImg from '../assets/images/product_leather_tote_1795062468753.jpg';
+
+export const HERO_IMAGE_URL = heroAtelierImg;
 
 export const STUDIO_IMAGE_GALLERY = [
   {
     label: 'ওয়্যারলেস স্টুডিও হেডফোন',
-    url: '/src/assets/images/product_wireless_audio_1795062468395.jpg',
+    url: productWirelessAudioImg,
   },
   {
     label: 'আর্টিসান অটোমেটিক ঘড়ি',
-    url: '/src/assets/images/product_artisan_watch_1795062468913.jpg',
+    url: productArtisanWatchImg,
   },
   {
     label: 'স্মোকড অ্যাম্বার পারফিউম',
-    url: '/src/assets/images/product_amber_fragrance_1795062469027.jpg',
+    url: productAmberFragranceImg,
   },
   {
     label: 'সিরামিক ও ব্রাস ডেস্ক ল্যাম্প',
-    url: '/src/assets/images/product_ceramic_lamp_1795062468114.jpg',
+    url: productCeramicLampImg,
   },
   {
     label: 'ফুল-গ্রেইন লেদার টোট ব্যাগ',
-    url: '/src/assets/images/product_leather_tote_1795062468753.jpg',
+    url: productLeatherToteImg,
   },
 ];
 
@@ -94,7 +101,7 @@ export const STARTER_PRODUCTS: Product[] = [
     compareAtPrice: 10500,
     stock: 18,
     sku: 'SHL-AUD-101',
-    imageUrl: '/src/assets/images/product_wireless_audio_1795062468395.jpg',
+    imageUrl: productWirelessAudioImg,
     featured: true,
     expressEligible: true,
     ratingAvg: 4.9,
@@ -112,7 +119,7 @@ export const STARTER_PRODUCTS: Product[] = [
     compareAtPrice: 14200,
     stock: 11,
     sku: 'SHL-WTC-204',
-    imageUrl: '/src/assets/images/product_artisan_watch_1795062468913.jpg',
+    imageUrl: productArtisanWatchImg,
     featured: true,
     expressEligible: true,
     ratingAvg: 4.8,
@@ -130,7 +137,7 @@ export const STARTER_PRODUCTS: Product[] = [
     compareAtPrice: 5400,
     stock: 26,
     sku: 'SHL-FRG-309',
-    imageUrl: '/src/assets/images/product_amber_fragrance_1795062469027.jpg',
+    imageUrl: productAmberFragranceImg,
     featured: true,
     expressEligible: true,
     ratingAvg: 4.9,
@@ -148,7 +155,7 @@ export const STARTER_PRODUCTS: Product[] = [
     compareAtPrice: 6000,
     stock: 9,
     sku: 'SHL-HOM-412',
-    imageUrl: '/src/assets/images/product_ceramic_lamp_1795062468114.jpg',
+    imageUrl: productCeramicLampImg,
     featured: false,
     expressEligible: true,
     ratingAvg: 4.7,
@@ -166,7 +173,7 @@ export const STARTER_PRODUCTS: Product[] = [
     compareAtPrice: 7900,
     stock: 7,
     sku: 'SHL-BAG-505',
-    imageUrl: '/src/assets/images/product_leather_tote_1795062468753.jpg',
+    imageUrl: productLeatherToteImg,
     featured: true,
     expressEligible: false,
     ratingAvg: 4.8,
@@ -184,7 +191,7 @@ export const STARTER_PRODUCTS: Product[] = [
     compareAtPrice: 22900,
     stock: 4,
     sku: 'SHL-CMB-601',
-    imageUrl: '/src/assets/images/hero_lifestyle_atelier_1795062469034.jpg',
+    imageUrl: heroAtelierImg,
     featured: false,
     expressEligible: true,
     ratingAvg: 5.0,

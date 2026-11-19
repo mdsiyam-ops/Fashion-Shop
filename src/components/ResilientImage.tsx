@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Package } from 'lucide-react';
 
 interface ResilientImageProps {
@@ -14,9 +14,23 @@ export const ResilientImage: React.FC<ResilientImageProps> = ({
   className = 'w-full h-full object-cover',
   fallbackLabel,
 }) => {
+  const [resolvedSrc, setResolvedSrc] = useState(src);
   const [hasError, setHasError] = useState(false);
 
-  if (hasError || !src) {
+  useEffect(() => {
+    setResolvedSrc(src);
+    setHasError(false);
+  }, [src]);
+
+  const handleImgError = () => {
+    if (resolvedSrc.startsWith('/src/assets/')) {
+      setResolvedSrc(`.${resolvedSrc}`);
+      return;
+    }
+    setHasError(true);
+  };
+
+  if (hasError || !resolvedSrc) {
     return (
       <div
         className="w-full h-full bg-gradient-to-br from-zinc-100 via-zinc-50 to-zinc-200 flex flex-col items-center justify-center p-4 text-center"
@@ -33,10 +47,10 @@ export const ResilientImage: React.FC<ResilientImageProps> = ({
 
   return (
     <img
-      src={src}
+      src={resolvedSrc}
       alt={alt}
       referrerPolicy="no-referrer"
-      onError={() => setHasError(true)}
+      onError={handleImgError}
       className={className}
     />
   );
