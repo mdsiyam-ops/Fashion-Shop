@@ -1,0 +1,304 @@
+{
+  "entities": {
+    "Category": {
+      "title": "Category",
+      "description": "Product category managed dynamically by store administrators.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "slug": { "type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[a-z0-9\\-]+$" },
+        "description": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "slug", "description", "createdAt", "updatedAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Storefront catalog product with real-time stock and pricing.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "categoryId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "categoryName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "price": { "type": "number" },
+        "compareAtPrice": { "type": "number" },
+        "stock": { "type": "number" },
+        "sku": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "imageUrl": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "featured": { "type": "boolean" },
+        "expressEligible": { "type": "boolean" },
+        "ratingAvg": { "type": "number" },
+        "reviewCount": { "type": "number" },
+        "soldCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "categoryId",
+        "categoryName",
+        "price",
+        "stock",
+        "sku",
+        "imageUrl",
+        "featured",
+        "expressEligible",
+        "ratingAvg",
+        "reviewCount",
+        "soldCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Customer product rating and feedback without exposing PII.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "productId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "rating": { "type": "number" },
+        "comment": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "verifiedPurchase": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "productId",
+        "userId",
+        "authorName",
+        "rating",
+        "comment",
+        "verifiedPurchase",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserPublic": {
+      "title": "UserPublic",
+      "description": "Non-PII user account record.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "role": { "type": "string", "enum": ["customer", "admin"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "UserPrivateProfile": {
+      "title": "UserPrivateProfile",
+      "description": "Strictly isolated PII profile (phone, address, email) accessible only to owner or admin.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "address": { "type": "string", "maxLength": 400 },
+        "city": { "type": "string", "maxLength": 80 },
+        "postalCode": { "type": "string", "maxLength": 20 },
+        "preferredDelivery": { "type": "string", "enum": ["express", "standard"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "email", "phone", "address", "city", "postalCode", "preferredDelivery", "updatedAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Private customer order with encrypted payment reference and shipping details.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "trackingCode": { "type": "string", "maxLength": 32, "pattern": "^SHL-[A-Z0-9]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "customerName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "customerPhone": { "type": "string", "minLength": 6, "maxLength": 30 },
+        "shippingAddress": { "type": "string", "minLength": 3, "maxLength": 400 },
+        "city": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "postalCode": { "type": "string", "maxLength": 20 },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "deliveryFee": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "deliverySpeed": { "type": "string", "enum": ["express", "standard"] },
+        "paymentMethod": { "type": "string", "enum": ["bkash", "nagad", "card", "cod"] },
+        "paymentStatus": { "type": "string", "enum": ["paid", "pending_cod", "refunded"] },
+        "paymentReference": { "type": "string", "maxLength": 80 },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "confirmed", "packed", "shipped", "delivered", "cancelled"]
+        },
+        "courierNote": { "type": "string", "maxLength": 300 },
+        "source": { "type": "string", "enum": ["web", "fb_shop_now"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "trackingCode",
+        "userId",
+        "customerName",
+        "customerPhone",
+        "shippingAddress",
+        "city",
+        "postalCode",
+        "items",
+        "subtotal",
+        "deliveryFee",
+        "totalAmount",
+        "deliverySpeed",
+        "paymentMethod",
+        "paymentStatus",
+        "paymentReference",
+        "status",
+        "courierNote",
+        "source",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "OrderTracking": {
+      "title": "OrderTracking",
+      "description": "Sanitized non-PII tracking projection created atomically with an order.",
+      "type": "object",
+      "properties": {
+        "trackingCode": { "type": "string", "maxLength": 32, "pattern": "^SHL-[A-Z0-9]+$" },
+        "orderId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "confirmed", "packed", "shipped", "delivered", "cancelled"]
+        },
+        "deliverySpeed": { "type": "string", "enum": ["express", "standard"] },
+        "city": { "type": "string", "maxLength": 80 },
+        "itemCount": { "type": "number" },
+        "courierNote": { "type": "string", "maxLength": 300 },
+        "estimatedWindow": { "type": "string", "maxLength": 80 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "trackingCode",
+        "orderId",
+        "userId",
+        "status",
+        "deliverySpeed",
+        "city",
+        "itemCount",
+        "courierNote",
+        "estimatedWindow",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Real-time user or admin notification event.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "recipientId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "type": { "type": "string", "enum": ["order_placed", "order_status", "stock_alert", "promo"] },
+        "relatedOrderId": { "type": "string", "maxLength": 128 },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "recipientId", "title", "message", "type", "relatedOrderId", "read", "createdAt"]
+    },
+    "StoreSettings": {
+      "title": "StoreSettings",
+      "description": "Storefront configuration including Facebook Shop Now and social contact links.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "storeName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "tagline": { "type": "string", "maxLength": 200 },
+        "facebookUrl": { "type": "string", "maxLength": 300 },
+        "messengerUrl": { "type": "string", "maxLength": 300 },
+        "whatsappNumber": { "type": "string", "maxLength": 30 },
+        "instagramUrl": { "type": "string", "maxLength": 300 },
+        "freeDeliveryThreshold": { "type": "number" },
+        "standardDeliveryFee": { "type": "number" },
+        "expressDeliveryFee": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "storeName",
+        "tagline",
+        "facebookUrl",
+        "messengerUrl",
+        "whatsappNumber",
+        "instagramUrl",
+        "freeDeliveryThreshold",
+        "standardDeliveryFee",
+        "expressDeliveryFee",
+        "updatedAt"
+      ]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Trusted admin role lookup record.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "Store product categories managed by admins."
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Storefront inventory and product catalog."
+    },
+    "/reviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/Review" },
+      "description": "Verified customer product ratings and reviews."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPublic" },
+      "description": "User account non-PII metadata."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateProfile" },
+      "description": "Strictly private user PII (phone, shipping address, email)."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Customer orders with shipping PII and tokenized payment reference."
+    },
+    "/orderTracking/{trackingCode}": {
+      "schema": { "$ref": "#/entities/OrderTracking" },
+      "description": "Sanitized non-PII delivery status lookup keyed by tracking code."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Real-time notifications per user or admin."
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/StoreSettings" },
+      "description": "Public store settings including social links and delivery fees."
+    },
+    "/admins/{adminUid}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Admin privilege lookup table."
+    }
+  }
+}

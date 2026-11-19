@@ -1,0 +1,6 @@
+{
+  "name": "Shoili Store — অনলাইন শপ ও অ্যাডমিন সিস্টেম",
+  "description": "সহজ অর্ডারিং, নিরাপদ পেমেন্ট গেটওয়ে, লাইভ অর্ডার ট্র্যাকিং, প্রোডাক্ট রিভিউ, রিয়েল-টাইম নোটিফিকেশন ও পূর্ণাঙ্গ অ্যাডমিন ইনভেন্টরি এবং বিক্রয় প্রতিবেদনসহ আধুনিক ই-কমার্স ওয়েবসাইট।",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
