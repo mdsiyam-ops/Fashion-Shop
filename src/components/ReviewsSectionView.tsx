@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { User } from 'firebase/auth';
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { Check, Star } from 'lucide-react';
-import { clampStr, db, handleFirestoreError, OperationType } from '../firebase';
+import { clampStr, db, handleFirestoreError, isVerifiedCustomer, OperationType } from '../firebase';
 import { formatTimestamp } from '../lib/format';
 import { Product, Review } from '../types';
 
@@ -53,7 +53,7 @@ export const ReviewsSectionView: React.FC<ReviewsSectionViewProps> = ({
       onRequireAuth();
       return;
     }
-    if (!currentUser.emailVerified) {
+    if (!isVerifiedCustomer(currentUser)) {
       setSuccessMsg('রিভিউ জমা দেওয়ার আগে উপরের বার থেকে আপনার ইমেইল ভেরিফাই সম্পন্ন করুন।');
       return;
     }

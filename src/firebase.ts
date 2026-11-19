@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, User } from 'firebase/auth';
 import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -92,4 +92,27 @@ export function toSlug(raw: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 80);
   return ascii.length > 0 ? ascii : `cat-${Date.now().toString(36)}`;
+}
+
+export function isVerifiedCustomer(user: User | null): boolean {
+  return Boolean(user && (user.emailVerified || Boolean(user.phoneNumber)));
+}
+
+export function formatBangladeshPhone(raw: string): string {
+  const trimmed = raw.trim().replace(/[\s\-()]/g, '');
+  if (!trimmed) return '';
+  if (trimmed.startsWith('+')) {
+    return '+' + trimmed.slice(1).replace(/\D/g, '');
+  }
+  const digits = trimmed.replace(/\D/g, '');
+  if (digits.startsWith('880') && digits.length >= 13) {
+    return `+${digits}`;
+  }
+  if (digits.startsWith('01') && digits.length === 11) {
+    return `+88${digits}`;
+  }
+  if (digits.startsWith('1') && digits.length === 10) {
+    return `+880${digits}`;
+  }
+  return digits ? `+${digits}` : '';
 }

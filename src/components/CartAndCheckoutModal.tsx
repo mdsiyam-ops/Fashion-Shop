@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { User } from 'firebase/auth';
 import { doc, increment, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { CheckCircle2, CreditCard, Lock, Minus, Plus, ShieldCheck, Smartphone, Trash2, Truck, X } from 'lucide-react';
-import { clampStr, db, handleFirestoreError, OperationType } from '../firebase';
+import { clampStr, db, handleFirestoreError, isVerifiedCustomer, OperationType } from '../firebase';
 import { DELIVERY_SPEED_LABELS, formatBDT, PAYMENT_METHOD_LABELS } from '../lib/format';
 import {
   CartItem,
@@ -75,8 +75,11 @@ export const CartAndCheckoutModal: React.FC<CartAndCheckoutModalProps> = ({
   }, [isOpen, initialStep]);
 
   useEffect(() => {
-    if (currentUser?.displayName && !customerName) {
-      setCustomerName(currentUser.displayName);
+    if (currentUser?.displayName) {
+      setCustomerName((prev) => prev || currentUser.displayName || '');
+    }
+    if (currentUser?.phoneNumber) {
+      setCustomerPhone((prev) => prev || currentUser.phoneNumber || '');
     }
     if (privateProfile) {
       if (privateProfile.phone) setCustomerPhone(privateProfile.phone);
@@ -85,7 +88,7 @@ export const CartAndCheckoutModal: React.FC<CartAndCheckoutModalProps> = ({
       if (privateProfile.postalCode) setPostalCode(privateProfile.postalCode);
       if (privateProfile.preferredDelivery) setDeliverySpeed(privateProfile.preferredDelivery);
     }
-  }, [currentUser, privateProfile, customerName]);
+  }, [currentUser, privateProfile]);
 
   if (!isOpen) return null;
 
@@ -113,7 +116,7 @@ export const CartAndCheckoutModal: React.FC<CartAndCheckoutModalProps> = ({
       onRequireAuth();
       return;
     }
-    if (!currentUser.emailVerified) {
+    if (!isVerifiedCustomer(currentUser)) {
       setGatewayError('অর্ডার সম্পন্ন করার আগে উপরের বার থেকে আপনার ইমেইল ভেরিফাই সম্পন্ন করুন।');
       return;
     }

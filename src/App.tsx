@@ -28,6 +28,7 @@ import {
   clampStr,
   db,
   handleFirestoreError,
+  isVerifiedCustomer,
   OperationType,
 } from './firebase';
 import {
@@ -132,24 +133,27 @@ export default function App() {
       if (user) {
         setAuthModalOpen(false);
       }
-      if (user && user.emailVerified) {
+      if (user && isVerifiedCustomer(user)) {
         setVerifyFeedback('');
         try {
           const userRef = doc(db, 'users', user.uid);
           const snap = await getDoc(userRef);
-          const displayName = clampStr(user.displayName || 'সম্মানিত গ্রাহক', 100);
+          const fallbackName = clampStr(
+            user.displayName || user.phoneNumber || 'সম্মানিত গ্রাহক',
+            100
+          );
           const isAdminEmail = user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
           if (!snap.exists()) {
             await setDoc(userRef, {
               uid: user.uid,
-              displayName,
+              displayName: fallbackName,
               role: isAdminEmail ? 'admin' : 'customer',
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             });
-          } else {
+          } else if (user.displayName) {
             await updateDoc(userRef, {
-              displayName,
+              displayName: clampStr(user.displayName, 100),
               updatedAt: serverTimestamp(),
             });
           }
@@ -386,7 +390,7 @@ export default function App() {
       />
 
       {/* Email Verification Prompt for newly created Email/Password accounts */}
-      {currentUser && !currentUser.emailVerified && (
+      {currentUser && currentUser.email && !currentUser.emailVerified && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 text-xs text-amber-900">
           <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start sm:items-center gap-2">

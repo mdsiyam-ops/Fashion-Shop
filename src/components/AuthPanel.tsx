@@ -1,16 +1,30 @@
-import React, { useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import {
+  ConfirmationResult,
   createUserWithEmailAndPassword,
+  RecaptchaVerifier,
   sendEmailVerification,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
+  signInWithPhoneNumber,
   signInWithPopup,
   updateProfile,
 } from 'firebase/auth';
-import { CheckCircle2, Eye, EyeOff, KeyRound, Lock, Mail, User as UserIcon, X } from 'lucide-react';
-import { auth, googleProvider } from '../firebase';
+import {
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Lock,
+  Mail,
+  Phone,
+  ShieldCheck,
+  User as UserIcon,
+  X,
+} from 'lucide-react';
+import { auth, formatBangladeshPhone, googleProvider } from '../firebase';
 
-type AuthMode = 'login' | 'signup' | 'forgot';
+type AuthMode = 'login' | 'signup' | 'phone' | 'forgot';
 
 interface AuthPanelProps {
   isModal?: boolean;
@@ -38,11 +52,29 @@ function getFriendlyAuthError(error: unknown): string {
   if (code === 'auth/invalid-email') {
     return 'অনুগ্রহ করে একটি সঠিক জিমেইল/ইমেইল ঠিকানা লিখুন।';
   }
+  if (code === 'auth/invalid-phone-number') {
+    return 'সঠিক মোবাইল নম্বর দিন (যেমন: 017XXXXXXXX অথবা +88017XXXXXXXX)।';
+  }
+  if (code === 'auth/missing-phone-number') {
+    return 'অনুগ্রহ করে আপনার মোবাইল নম্বর লিখুন।';
+  }
+  if (code === 'auth/invalid-verification-code') {
+    return 'OTP কোডটি সঠিক নয়। এসএমএস থেকে পাওয়া ৬ ডিজিটের কোডটি যাচাই করে আবার দিন।';
+  }
+  if (code === 'auth/code-expired') {
+    return 'OTP কোডের মেয়াদ শেষ হয়ে গেছে। অনুগ্রহ করে আবার কোড পাঠান।';
+  }
+  if (code === 'auth/captcha-check-failed') {
+    return 'নিরাপত্তা যাচাই (reCAPTCHA) সম্পন্ন হয়নি। অনুগ্রহ করে আবার চেষ্টা করুন।';
+  }
+  if (code === 'auth/quota-exceeded' || code === 'auth/billing-not-enabled') {
+    return 'Firebase প্রজেক্টে SMS OTP কোটা সীমা অতিক্রম হয়েছে বা Phone Auth বিলিং/কোটা কনফিগার প্রয়োজন।';
+  }
   if (code === 'auth/too-many-requests') {
     return 'অতিরিক্ত চেষ্টার কারণে সাময়িকভাবে ব্লক করা হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।';
   }
   if (code === 'auth/operation-not-allowed') {
-    return 'Firebase Console-এ Email/Password সাইন-ইন এখনো চালু করা হয়নি। Authentication → Sign-in method থেকে Email/Password Enable করুন।';
+    return 'Firebase Console → Authentication → Sign-in method থেকে সংশ্লিষ্ট সাইন-ইন মাধ্যমটি (Email/Password বা Phone) এখনো Enable করা হয়নি।';
   }
   if (code === 'auth/account-exists-with-different-credential') {
     return 'এই জিমেইল দিয়ে আগেই অন্য মাধ্যমে অ্যাকাউন্ট খোলা হয়েছে। একটি জিমেইল দিয়ে একটি অ্যাকাউন্টই অনুমোদিত।';
@@ -67,14 +99,46 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // Phone OTP Auth state
+  const [phoneInput, setPhoneInput] = useState('');
+  const [phoneName, setPhoneName] = useState('');
+  const [formattedPhone, setFormattedPhone] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+  const recaptchaId = useId().replace(/:/g, '_');
+  const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  const clearRecaptcha = () => {
+    if (recaptchaVerifierRef.current) {
+      try {
+        recaptchaVerifierRef.current.clear();
+      } catch {
+        // ignore cleanup error
+      }
+      recaptchaVerifierRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      clearRecaptcha();
+    };
+  }, []);
 
   const switchMode = (next: AuthMode) => {
     setMode(next);
     setErrorMsg('');
     setSuccessMsg('');
+    if (next !== 'phone') {
+      setConfirmationResult(null);
+      setOtpCode('');
+      clearRecaptcha();
+    }
   };
 
   const handleGoogleLogin = async () => {
@@ -179,6 +243,67 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
     }
   };
 
+  const handleSendPhoneOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    const e164Phone = formatBangladeshPhone(phoneInput);
+    if (!e164Phone || e164Phone.length < 10) {
+      setErrorMsg('সঠিক মোবাইল নম্বর লিখুন (যেমন: 01712345678 অথবা +8801712345678)।');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      clearRecaptcha();
+      const verifier = new RecaptchaVerifier(auth, `recaptcha-${recaptchaId}`, {
+        size: 'invisible',
+      });
+      recaptchaVerifierRef.current = verifier;
+      const result = await signInWithPhoneNumber(auth, e164Phone, verifier);
+      setConfirmationResult(result);
+      setFormattedPhone(e164Phone);
+      setSuccessMsg(`${e164Phone} নম্বরে ৬ ডিজিটের ভেরিফিকেশন কোড (OTP) পাঠানো হয়েছে।`);
+    } catch (error) {
+      clearRecaptcha();
+      setErrorMsg(getFriendlyAuthError(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyPhoneOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!confirmationResult) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    const cleanOtp = otpCode.trim();
+    if (cleanOtp.length < 4) {
+      setErrorMsg('এসএমএস থেকে পাওয়া ৬ ডিজিটের OTP কোডটি লিখুন।');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const cred = await confirmationResult.confirm(cleanOtp);
+      const cleanName = phoneName.trim();
+      if (cleanName && !cred.user.displayName) {
+        try {
+          await updateProfile(cred.user, { displayName: cleanName });
+        } catch {
+          // Non-fatal profile name update
+        }
+      }
+      onSuccess?.();
+    } catch (error) {
+      setErrorMsg(getFriendlyAuthError(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div
       className={`bg-white border border-zinc-200 rounded-xl p-6 sm:p-8 space-y-5 relative ${
@@ -200,6 +325,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
         <h2 className="text-xl font-bold text-zinc-950">
           {mode === 'login' && 'অ্যাকাউন্টে লগইন করুন'}
           {mode === 'signup' && 'নতুন অ্যাকাউন্ট তৈরি করুন'}
+          {mode === 'phone' && 'ফোন নম্বর দিয়ে সাইন ইন'}
           {mode === 'forgot' && 'পাসওয়ার্ড রিসেট করুন'}
         </h2>
         <p className="text-xs text-zinc-500 leading-relaxed">
@@ -207,6 +333,8 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
             'ক্যাটালগ অর্ডার, লাইভ ট্র্যাকিং, রিভিউ ও প্রোফাইল ম্যানেজমেন্টের জন্য সাইন ইন করুন।'}
           {mode === 'signup' &&
             'একটি জিমেইল দিয়ে একটি অ্যাকাউন্টই খোলা যাবে। আপনার সকল ব্যক্তিগত তথ্য সম্পূর্ণ সুরক্ষিত।'}
+          {mode === 'phone' &&
+            'আপনার মোবাইল নম্বরে ৬ ডিজিটের ভেরিফিকেশন কোড (OTP) পাঠিয়ে দ্রুত সাইন ইন করুন।'}
           {mode === 'forgot' &&
             'আপনার অ্যাকাউন্টের জিমেইল ঠিকানা দিলে পাসওয়ার্ড রিসেট করার লিংক পাঠানো হবে।'}
         </p>
@@ -214,7 +342,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
 
       {/* Mode Switch Tabs */}
       {mode !== 'forgot' && (
-        <div className="grid grid-cols-2 gap-1 p-1 bg-zinc-100 rounded-lg">
+        <div className="grid grid-cols-3 gap-1 p-1 bg-zinc-100 rounded-lg">
           <button
             type="button"
             onClick={() => switchMode('login')}
@@ -224,7 +352,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
                 : 'text-zinc-600 hover:text-zinc-950'
             }`}
           >
-            লগইন
+            জিমেইল লগইন
           </button>
           <button
             type="button"
@@ -236,6 +364,17 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
             }`}
           >
             নতুন অ্যাকাউন্ট
+          </button>
+          <button
+            type="button"
+            onClick={() => switchMode('phone')}
+            className={`py-2 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+              mode === 'phone'
+                ? 'bg-white text-zinc-950 shadow-xs'
+                : 'text-zinc-600 hover:text-zinc-950'
+            }`}
+          >
+            ফোন নম্বর
           </button>
         </div>
       )}
@@ -394,6 +533,102 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
         </form>
       )}
 
+      {/* Phone Number (OTP) Form */}
+      {mode === 'phone' && (
+        <div className="space-y-4">
+          {!confirmationResult ? (
+            <form onSubmit={handleSendPhoneOtp} className="space-y-3.5">
+              <div>
+                <label className="block text-xs text-zinc-600 mb-1">আপনার নাম (ঐচ্ছিক)</label>
+                <div className="relative">
+                  <UserIcon className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    maxLength={100}
+                    value={phoneName}
+                    onChange={(e) => setPhoneName(e.target.value)}
+                    placeholder="যেমন: সাদমান সাকিব"
+                    className="w-full pl-9 pr-3 py-2 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-700"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs text-zinc-600 mb-1">মোবাইল নম্বর *</label>
+                <div className="relative">
+                  <Phone className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="tel"
+                    required
+                    value={phoneInput}
+                    onChange={(e) => setPhoneInput(e.target.value)}
+                    placeholder="01712345678 বা +8801712345678"
+                    className="w-full pl-9 pr-3 py-2.5 text-sm font-mono-tabular border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-700"
+                  />
+                </div>
+                <p className="text-[11px] text-zinc-500 mt-1">
+                  বাংলাদেশি ১১ ডিজিটের নম্বর দিলে স্বয়ংক্রিয়ভাবে +880 যুক্ত হবে
+                </p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-2.5 px-4 bg-zinc-950 text-white text-sm font-semibold rounded-lg hover:bg-zinc-800 transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                {loading ? 'OTP কোড পাঠানো হচ্ছে...' : 'ভেরিফিকেশন কোড (OTP) পাঠান'}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleVerifyPhoneOtp} className="space-y-4">
+              <div className="p-3 bg-zinc-50 border border-zinc-200 rounded-lg flex items-center justify-between gap-2 text-xs">
+                <span className="text-zinc-700">
+                  নম্বর: <strong className="font-mono-tabular text-zinc-950">{formattedPhone}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmationResult(null);
+                    setOtpCode('');
+                    setErrorMsg('');
+                    setSuccessMsg('');
+                    clearRecaptcha();
+                  }}
+                  className="text-emerald-700 font-semibold hover:underline cursor-pointer"
+                >
+                  নম্বর পরিবর্তন
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-xs text-zinc-600 mb-1">৬ ডিজিটের OTP কোড *</label>
+                <div className="relative">
+                  <ShieldCheck className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    required
+                    maxLength={6}
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                    placeholder="১২৩৪৫৬"
+                    className="w-full pl-9 pr-3 py-2.5 text-sm font-mono-tabular tracking-widest border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-700"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-2.5 px-4 bg-emerald-700 text-white text-sm font-semibold rounded-lg hover:bg-emerald-800 transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                {loading ? 'যাচাই হচ্ছে...' : 'OTP যাচাই করে সাইন ইন করুন'}
+              </button>
+            </form>
+          )}
+        </div>
+      )}
+
       {/* Forgot Password Form */}
       {mode === 'forgot' && (
         <form onSubmit={handleForgotPasswordSubmit} className="space-y-4">
@@ -430,7 +665,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
         </form>
       )}
 
-      {/* Google Login Divider & Button */}
+      {/* Alternative Sign-in Buttons */}
       {mode !== 'forgot' && (
         <>
           <div className="relative py-1">
@@ -442,20 +677,37 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
             </div>
           </div>
 
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => void handleGoogleLogin()}
-            className="w-full py-2.5 px-4 border border-zinc-300 bg-white text-zinc-950 text-sm font-semibold rounded-lg hover:bg-zinc-50 transition-colors disabled:opacity-50 cursor-pointer"
-          >
-            Google (জিমেইল) দিয়ে সরাসরি সাইন ইন করুন
-          </button>
+          <div className="space-y-2.5">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void handleGoogleLogin()}
+              className="w-full py-2.5 px-4 border border-zinc-300 bg-white text-zinc-950 text-sm font-semibold rounded-lg hover:bg-zinc-50 transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              Google (জিমেইল) দিয়ে সরাসরি সাইন ইন করুন
+            </button>
+
+            {mode !== 'phone' && (
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => switchMode('phone')}
+                className="w-full py-2.5 px-4 border border-zinc-200 bg-zinc-50 text-zinc-900 text-sm font-semibold rounded-lg hover:bg-zinc-100 transition-colors disabled:opacity-50 cursor-pointer inline-flex items-center justify-center gap-2"
+              >
+                <Phone className="w-4 h-4 text-emerald-700" />
+                <span>ফোন নম্বর (OTP) দিয়ে সাইন ইন করুন</span>
+              </button>
+            )}
+          </div>
         </>
       )}
 
+      {/* Invisible reCAPTCHA anchor for Phone Auth */}
+      <div id={`recaptcha-${recaptchaId}`} />
+
       <div className="pt-3 border-t border-zinc-200 flex items-center justify-center gap-2 text-[11px] text-zinc-500">
         <Lock className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
-        <span>একটি জিমেইল দিয়ে একটিই অ্যাকাউন্ট ও সম্পূর্ণ তথ্য সুরক্ষা</span>
+        <span>জিমেইল ও ফোন নম্বর সাইন ইন সম্পূর্ণ নিরাপদ ও এনক্রিপ্টেড</span>
       </div>
     </div>
   );

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { User } from 'firebase/auth';
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { Check, Minus, Plus, ShieldCheck, Star, Truck, X } from 'lucide-react';
-import { clampStr, db, handleFirestoreError, OperationType } from '../firebase';
+import { clampStr, db, handleFirestoreError, isVerifiedCustomer, OperationType } from '../firebase';
 import { formatBDT, formatTimestamp } from '../lib/format';
 import { Product, Review } from '../types';
 import { ResilientImage } from './ResilientImage';
@@ -68,7 +68,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       onRequireAuth();
       return;
     }
-    if (!currentUser.emailVerified) {
+    if (!isVerifiedCustomer(currentUser)) {
       setReviewFeedback('রিভিউ জমা দেওয়ার আগে উপরের বার থেকে আপনার ইমেইল ভেরিফাই সম্পন্ন করুন।');
       return;
     }

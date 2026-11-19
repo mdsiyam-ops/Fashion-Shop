@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { User } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, updateDoc, writeBatch } from 'firebase/firestore';
 import { Bell, Check, LogOut, ShieldCheck } from 'lucide-react';
-import { clampStr, db, handleFirestoreError, OperationType } from '../firebase';
+import { clampStr, db, handleFirestoreError, isVerifiedCustomer, OperationType } from '../firebase';
 import { formatBDT, formatTimestamp, ORDER_STATUS_LABELS } from '../lib/format';
 import { AppNotification, DeliverySpeed, Order, UserPrivateProfile } from '../types';
 import { AuthPanel } from './AuthPanel';
@@ -39,21 +39,24 @@ export const ProfileAndNotificationsView: React.FC<ProfileAndNotificationsViewPr
 
   useEffect(() => {
     if (currentUser?.displayName) setDisplayName(currentUser.displayName);
+    if (currentUser?.phoneNumber) {
+      setPhone((prev) => prev || currentUser.phoneNumber || '');
+    }
   }, [currentUser]);
 
   useEffect(() => {
     if (privateProfile) {
-      setPhone(privateProfile.phone || '');
+      setPhone(privateProfile.phone || currentUser?.phoneNumber || '');
       setAddress(privateProfile.address || '');
       setCity(privateProfile.city || 'ঢাকা');
       setPostalCode(privateProfile.postalCode || '1205');
       setPreferredDelivery(privateProfile.preferredDelivery || 'express');
     }
-  }, [privateProfile]);
+  }, [privateProfile, currentUser]);
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser || !currentUser.emailVerified) return;
+    if (!isVerifiedCustomer(currentUser) || !currentUser) return;
     setSaving(true);
     setSavedNotice(false);
     try {
@@ -143,9 +146,11 @@ export const ProfileAndNotificationsView: React.FC<ProfileAndNotificationsViewPr
             <span>{isAdmin ? 'অ্যাডমিন ও যাচাইকৃত অ্যাকাউন্ট' : 'যাচাইকৃত গ্রাহক অ্যাকাউন্ট'}</span>
           </div>
           <h1 className="text-2xl font-bold text-zinc-950">
-            {currentUser.displayName || 'সম্মানিত গ্রাহক'}
+            {currentUser.displayName || currentUser.phoneNumber || 'সম্মানিত গ্রাহক'}
           </h1>
-          <p className="text-xs text-zinc-500">{currentUser.email}</p>
+          <p className="text-xs text-zinc-500">
+            {currentUser.email || currentUser.phoneNumber}
+          </p>
         </div>
 
         <button
@@ -249,12 +254,12 @@ export const ProfileAndNotificationsView: React.FC<ProfileAndNotificationsViewPr
 
             <button
               type="submit"
-              disabled={saving || !currentUser.emailVerified}
+              disabled={saving || !isVerifiedCustomer(currentUser)}
               className="w-full py-2.5 px-4 bg-zinc-950 text-white text-sm font-semibold rounded-lg hover:bg-zinc-800 transition-colors disabled:opacity-50 cursor-pointer"
             >
               {saving
                 ? 'সংরক্ষণ হচ্ছে...'
-                : !currentUser.emailVerified
+                : !isVerifiedCustomer(currentUser)
                 ? 'প্রথমে উপরের বার থেকে ইমেইল ভেরিফাই করুন'
                 : 'প্রোফাইল আপডেট করুন'}
             </button>
