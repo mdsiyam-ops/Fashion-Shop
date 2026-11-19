@@ -1,7 +1,7 @@
 export async function compressImageFileToDataUrl(
   file: File,
-  maxDimension = 720,
-  maxLength = 150000
+  maxDimension = 640,
+  maxLength = 85000
 ): Promise<string> {
   if (!file.type.startsWith('image/')) {
     throw new Error('শুধুমাত্র ছবির ফাইল (JPG, PNG, WebP) আপলোড করা যাবে।');

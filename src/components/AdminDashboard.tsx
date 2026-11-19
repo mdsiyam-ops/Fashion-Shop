@@ -74,6 +74,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [prodImages, setProdImages] = useState<string[]>([]);
   const [uploadingImages, setUploadingImages] = useState(false);
   const [imageUploadError, setImageUploadError] = useState('');
+  const [savingProductForm, setSavingProductForm] = useState(false);
+  const [productFormError, setProductFormError] = useState('');
+  const [productSuccessMsg, setProductSuccessMsg] = useState('');
   const [prodFeatured, setProdFeatured] = useState(true);
   const [prodExpress, setProdExpress] = useState(true);
   const [showProductForm, setShowProductForm] = useState(false);
@@ -203,6 +206,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setProdSku(`SHL-${Date.now().toString().slice(-4)}`);
     setProdImages([]);
     setImageUploadError('');
+    setProductFormError('');
+    setProductSuccessMsg('');
     setProdFeatured(true);
     setProdExpress(true);
     setShowProductForm(true);
@@ -221,6 +226,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       p.imageUrls && p.imageUrls.length > 0 ? p.imageUrls : p.imageUrl ? [p.imageUrl] : [];
     setProdImages(existingList);
     setImageUploadError('');
+    setProductFormError('');
+    setProductSuccessMsg('');
     setProdFeatured(p.featured);
     setProdExpress(p.expressEligible);
     setShowProductForm(true);
@@ -270,8 +277,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    setProductFormError('');
+    setProductSuccessMsg('');
     const cat = categories.find((c) => c.id === prodCatId) || categories[0];
-    if (!cat) return;
+    if (!cat) {
+      setProductFormError('প্রথমে একটি ক্যাটাগরি তৈরি করুন।');
+      return;
+    }
 
     if (prodImages.length === 0) {
       setImageUploadError('অনুগ্রহ করে পণ্যের কমপক্ষে একটি ছবি আপলোড করুন।');
@@ -288,8 +300,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       .filter(Boolean);
     const primaryImage = cleanImages[0] || STUDIO_IMAGE_GALLERY[0].url;
 
-    const payload: Record<string, unknown> = {
-      id,
+    const basePayload: Record<string, unknown> = {
       name: clampStr(prodName, 140),
       description: clampStr(prodDesc || prodName, 2000),
       categoryId: cat.id,
@@ -305,27 +316,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
 
     if (compareNum > priceNum) {
-      payload.compareAtPrice = compareNum;
+      basePayload.compareAtPrice = compareNum;
     }
 
+    setSavingProductForm(true);
     try {
       if (!hasFirestoreProducts) {
         await seedInitialStoreData(currentUser.uid);
       }
       if (editingProductId) {
-        await updateDoc(doc(db, 'products', id), payload);
+        await updateDoc(doc(db, 'products', id), basePayload);
+        setProductSuccessMsg('পণ্যটি সফলভাবে আপডেট হয়ে ওয়েবসাইটে প্রকাশিত হয়েছে।');
       } else {
         await setDoc(doc(db, 'products', id), {
-          ...payload,
+          id,
+          ...basePayload,
           ratingAvg: 5.0,
           reviewCount: 0,
           soldCount: 0,
           createdAt: serverTimestamp(),
         });
+        setProductSuccessMsg('নতুন পণ্যটি সফলভাবে যুক্ত হয়ে ওয়েবসাইটে প্রকাশিত হয়েছে।');
       }
       setShowProductForm(false);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `products/${id}`);
+      const msg = error instanceof Error ? error.message : 'সংরক্ষণ করা যায়নি';
+      setProductFormError(`পণ্যটি সংরক্ষণ করা যায়নি (${msg})।`);
+    } finally {
+      setSavingProductForm(false);
     }
   };
 
@@ -678,6 +696,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
               </div>
 
+              {productSuccessMsg && (
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2 font-medium">
+                  <Check className="w-4 h-4 text-emerald-700 shrink-0" />
+                  <span>{productSuccessMsg}</span>
+                </div>
+              )}
+
               {showProductForm && (
                 <form
                   onSubmit={handleSaveProduct}
@@ -893,12 +918,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </label>
                   </div>
 
+                  {productFormError && (
+                    <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700">
+                      {productFormError}
+                    </div>
+                  )}
+
                   <div className="flex items-center gap-3 pt-2">
                     <button
                       type="submit"
-                      className="px-5 py-2.5 bg-emerald-700 text-white text-xs font-semibold rounded-lg hover:bg-emerald-800 cursor-pointer"
+                      disabled={savingProductForm || uploadingImages}
+                      className="px-5 py-2.5 bg-emerald-700 text-white text-xs font-semibold rounded-lg hover:bg-emerald-800 disabled:opacity-50 cursor-pointer"
                     >
-                      পণ্য সংরক্ষণ করুন
+                      {savingProductForm ? 'সংরক্ষণ হচ্ছে...' : 'পণ্য সংরক্ষণ করুন'}
                     </button>
                     <button
                       type="button"

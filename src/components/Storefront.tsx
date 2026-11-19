@@ -42,7 +42,7 @@ export const Storefront: React.FC<StorefrontProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('all');
   const [priceRange, setPriceRange] = useState<'all' | 'under3k' | '3kto8k' | 'above8k'>('all');
-  const [sortBy, setSortBy] = useState<'popular' | 'price_asc' | 'price_desc' | 'rating'>('popular');
+  const [sortBy, setSortBy] = useState<'newest' | 'popular' | 'price_asc' | 'price_desc' | 'rating'>('newest');
   const [expressOnly, setExpressOnly] = useState(false);
   const [inStockOnly, setInStockOnly] = useState(false);
   const [addedId, setAddedId] = useState<string | null>(null);
@@ -79,6 +79,14 @@ export const Storefront: React.FC<StorefrontProps> = ({
       return true;
     });
 
+    const getCreatedSeconds = (val: unknown): number => {
+      if (!val || typeof val !== 'object') return 0;
+      const ts = val as { seconds?: number; toMillis?: () => number };
+      if (typeof ts.toMillis === 'function') return ts.toMillis();
+      if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+      return 0;
+    };
+
     return [...list].sort((a, b) => {
       if (sortBy === 'price_asc') return a.price - b.price;
       if (sortBy === 'price_desc') return b.price - a.price;
@@ -87,6 +95,11 @@ export const Storefront: React.FC<StorefrontProps> = ({
         const rb = productReviewStats[b.id]?.avg ?? b.ratingAvg;
         return rb - ra;
       }
+      if (sortBy === 'popular') {
+        return b.soldCount - a.soldCount;
+      }
+      const timeDiff = getCreatedSeconds(b.createdAt) - getCreatedSeconds(a.createdAt);
+      if (timeDiff !== 0) return timeDiff;
       return b.soldCount - a.soldCount;
     });
   }, [
@@ -252,6 +265,7 @@ export const Storefront: React.FC<StorefrontProps> = ({
               aria-label="সাজানোর ধরন"
               className="px-3 py-1.5 text-xs font-medium bg-white border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-700 cursor-pointer"
             >
+              <option value="newest">নতুন পণ্য আগে</option>
               <option value="popular">সর্বাধিক বিক্রিত</option>
               <option value="price_asc">দাম: কম থেকে বেশি</option>
               <option value="price_desc">দাম: বেশি থেকে কম</option>
