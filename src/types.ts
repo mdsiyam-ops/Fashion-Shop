@@ -34,6 +34,7 @@ export interface Product {
   stock: number;
   sku: string;
   imageUrl: string;
+  imageUrls?: string[];
   featured: boolean;
   expressEligible: boolean;
   ratingAvg: number;

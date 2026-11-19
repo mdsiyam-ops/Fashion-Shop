@@ -8,12 +8,15 @@ import {
   Download,
   Edit3,
   FolderKanban,
+  ImagePlus,
   Layers,
   PackagePlus,
   Share2,
   ShieldAlert,
   ShoppingCart,
   Trash2,
+  Upload,
+  X,
 } from 'lucide-react';
 import { clampStr, db, handleFirestoreError, OperationType, sanitizeId, toSlug } from '../firebase';
 import {
@@ -24,6 +27,7 @@ import {
   PAYMENT_METHOD_LABELS,
   PAYMENT_STATUS_LABELS,
 } from '../lib/format';
+import { compressImageFileToDataUrl } from '../lib/imageUpload';
 import { seedInitialStoreData, STUDIO_IMAGE_GALLERY } from '../lib/seedData';
 import { Category, Order, OrderStatus, Product, StoreSettings } from '../types';
 import { ResilientImage } from './ResilientImage';
@@ -67,7 +71,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [prodComparePrice, setProdComparePrice] = useState('');
   const [prodStock, setProdStock] = useState('');
   const [prodSku, setProdSku] = useState('');
-  const [prodImageUrl, setProdImageUrl] = useState(STUDIO_IMAGE_GALLERY[0].url);
+  const [prodImages, setProdImages] = useState<string[]>([]);
+  const [uploadingImages, setUploadingImages] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState('');
   const [prodFeatured, setProdFeatured] = useState(true);
   const [prodExpress, setProdExpress] = useState(true);
   const [showProductForm, setShowProductForm] = useState(false);
@@ -195,7 +201,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setProdComparePrice('');
     setProdStock('10');
     setProdSku(`SHL-${Date.now().toString().slice(-4)}`);
-    setProdImageUrl(STUDIO_IMAGE_GALLERY[0].url);
+    setProdImages([]);
+    setImageUploadError('');
     setProdFeatured(true);
     setProdExpress(true);
     setShowProductForm(true);
@@ -210,10 +217,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setProdComparePrice(p.compareAtPrice ? String(p.compareAtPrice) : '');
     setProdStock(String(p.stock));
     setProdSku(p.sku);
-    setProdImageUrl(p.imageUrl);
+    const existingList =
+      p.imageUrls && p.imageUrls.length > 0 ? p.imageUrls : p.imageUrl ? [p.imageUrl] : [];
+    setProdImages(existingList);
+    setImageUploadError('');
     setProdFeatured(p.featured);
     setProdExpress(p.expressEligible);
     setShowProductForm(true);
+  };
+
+  const handleImageFilesSelected = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setImageUploadError('');
+    const remainingSlots = 5 - prodImages.length;
+    if (remainingSlots <= 0) {
+      setImageUploadError('একটি পণ্যে সর্বোচ্চ ৫টি ছবি আপলোড করা যাবে।');
+      return;
+    }
+
+    const selected = Array.from(files).slice(0, remainingSlots);
+    setUploadingImages(true);
+    try {
+      const processed: string[] = [];
+      for (const file of selected) {
+        const compressed = await compressImageFileToDataUrl(file);
+        processed.push(compressed);
+      }
+      setProdImages((prev) => [...prev, ...processed].slice(0, 5));
+      if (files.length > remainingSlots) {
+        setImageUploadError('সর্বোচ্চ ৫টি ছবি রাখা হয়েছে। বাকিগুলো বাদ দেওয়া হয়েছে।');
+      }
+    } catch (err) {
+      setImageUploadError(
+        err instanceof Error ? err.message : 'ছবি আপলোড করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।'
+      );
+    } finally {
+      setUploadingImages(false);
+    }
+  };
+
+  const handleSetPrimaryImage = (index: number) => {
+    setProdImages((prev) => {
+      if (index <= 0 || index >= prev.length) return prev;
+      const picked = prev[index];
+      return [picked, ...prev.filter((_, i) => i !== index)];
+    });
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setProdImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSaveProduct = async (e: React.FormEvent) => {
@@ -221,10 +273,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const cat = categories.find((c) => c.id === prodCatId) || categories[0];
     if (!cat) return;
 
+    if (prodImages.length === 0) {
+      setImageUploadError('অনুগ্রহ করে পণ্যের কমপক্ষে একটি ছবি আপলোড করুন।');
+      return;
+    }
+
     const id = editingProductId || sanitizeId(`prod_${Date.now()}`);
     const priceNum = Math.max(0, Number(prodPrice) || 0);
     const compareNum = Number(prodComparePrice) || 0;
     const stockNum = Math.max(0, Math.floor(Number(prodStock) || 0));
+    const cleanImages = prodImages
+      .slice(0, 5)
+      .map((img) => clampStr(img, 250000))
+      .filter(Boolean);
+    const primaryImage = cleanImages[0] || STUDIO_IMAGE_GALLERY[0].url;
 
     const payload: Record<string, unknown> = {
       id,
@@ -235,7 +297,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       price: priceNum,
       stock: stockNum,
       sku: clampStr(prodSku || `SHL-${Date.now().toString().slice(-4)}`, 64),
-      imageUrl: clampStr(prodImageUrl || STUDIO_IMAGE_GALLERY[0].url, 1000),
+      imageUrl: primaryImage,
+      imageUrls: cleanImages,
       featured: prodFeatured,
       expressEligible: prodExpress,
       updatedAt: serverTimestamp(),
@@ -698,28 +761,103 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs text-zinc-600 mb-1">ছবি নির্বাচন অথবা URL</label>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <select
-                        value={prodImageUrl}
-                        onChange={(e) => setProdImageUrl(e.target.value)}
-                        className="px-3 py-2 text-sm border border-zinc-200 rounded-lg"
-                      >
-                        {STUDIO_IMAGE_GALLERY.map((g) => (
-                          <option key={g.url} value={g.url}>
-                            স্টুডিও: {g.label}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="text"
-                        value={prodImageUrl}
-                        onChange={(e) => setProdImageUrl(e.target.value)}
-                        placeholder="ছবির URL দিন..."
-                        className="px-3 py-2 text-sm border border-zinc-200 rounded-lg"
-                      />
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs text-zinc-600 font-medium">
+                        পণ্যের ছবি আপলোড করুন * (১ থেকে সর্বোচ্চ ৫টি ছবি)
+                      </label>
+                      <span className="text-[11px] text-zinc-500 tabular-nums">
+                        {prodImages.length}/5টি যুক্ত হয়েছে
+                      </span>
                     </div>
+
+                    <label
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        void handleImageFilesSelected(e.dataTransfer.files);
+                      }}
+                      className={`flex flex-col items-center justify-center gap-2 p-6 border-2 border-dashed rounded-xl text-center transition-colors cursor-pointer ${
+                        uploadingImages
+                          ? 'border-emerald-400 bg-emerald-50/40'
+                          : 'border-zinc-300 bg-zinc-50/60 hover:border-zinc-950 hover:bg-zinc-50'
+                      }`}
+                    >
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        disabled={uploadingImages || prodImages.length >= 5}
+                        onChange={(e) => {
+                          void handleImageFilesSelected(e.target.files);
+                          e.target.value = '';
+                        }}
+                        className="hidden"
+                      />
+                      <div className="w-10 h-10 rounded-full bg-white border border-zinc-200 flex items-center justify-center text-zinc-700">
+                        {uploadingImages ? (
+                          <Upload className="w-4 h-4 text-emerald-700 animate-pulse" />
+                        ) : (
+                          <ImagePlus className="w-4 h-4 text-zinc-700" />
+                        )}
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-semibold text-zinc-950">
+                          {uploadingImages
+                            ? 'ছবি প্রসেস হচ্ছে...'
+                            : prodImages.length >= 5
+                            ? 'সর্বোচ্চ ৫টি ছবি আপলোড সম্পন্ন'
+                            : 'এক বা একাধিক ছবি সিলেক্ট করতে ক্লিক করুন অথবা এখানে ড্র্যাগ করুন'}
+                        </p>
+                        <p className="text-[11px] text-zinc-500">
+                          ফোন গ্যালারি বা কম্পিউটার থেকে JPG, PNG বা WebP ফাইল আপলোড করুন
+                        </p>
+                      </div>
+                    </label>
+
+                    {imageUploadError && (
+                      <p className="text-xs text-rose-600 font-medium">{imageUploadError}</p>
+                    )}
+
+                    {prodImages.length > 0 && (
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-1">
+                        {prodImages.map((imgUrl, idx) => (
+                          <div
+                            key={`${idx}-${imgUrl.slice(0, 24)}`}
+                            className={`relative group rounded-lg overflow-hidden border bg-zinc-100 aspect-square ${
+                              idx === 0 ? 'border-emerald-700 ring-2 ring-emerald-700/20' : 'border-zinc-200'
+                            }`}
+                          >
+                            <ResilientImage
+                              src={imgUrl}
+                              alt={`পণ্যের ছবি ${idx + 1}`}
+                              className="w-full h-full object-cover"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveImage(idx)}
+                              className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-zinc-950/80 text-white flex items-center justify-center hover:bg-rose-600 transition-colors cursor-pointer"
+                              aria-label="ছবি সরান"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                            {idx === 0 ? (
+                              <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-emerald-700 text-white text-[10px] font-semibold">
+                                মূল ছবি
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleSetPrimaryImage(idx)}
+                                className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-zinc-950/75 text-white text-[10px] font-medium hover:bg-zinc-950 cursor-pointer"
+                              >
+                                মূল ছবি করুন
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div>

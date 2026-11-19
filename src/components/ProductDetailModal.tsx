@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { User } from 'firebase/auth';
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { Check, Minus, Plus, ShieldCheck, Star, Truck, X } from 'lucide-react';
@@ -27,11 +27,17 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   onRequireAuth,
 }) => {
   const [quantity, setQuantity] = useState(1);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [ratingInput, setRatingInput] = useState(5);
   const [commentInput, setCommentInput] = useState('');
   const [authorNameInput, setAuthorNameInput] = useState(currentUser?.displayName || '');
   const [submittingReview, setSubmittingReview] = useState(false);
   const [reviewFeedback, setReviewFeedback] = useState('');
+
+  useEffect(() => {
+    setActiveImageIndex(0);
+    setQuantity(1);
+  }, [product?.id]);
 
   const productReviews = useMemo(() => {
     if (!product) return [];
@@ -131,14 +137,47 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           {/* Split Product Overview & Contiguous Purchase Module */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             {/* Gallery Left */}
-            <div className="lg:col-span-6">
-              <div className="aspect-[4/3] rounded-xl overflow-hidden bg-zinc-100 border border-zinc-200">
-                <ResilientImage
-                  src={product.imageUrl}
-                  alt={product.name}
-                  fallbackLabel={product.name}
-                />
-              </div>
+            <div className="lg:col-span-6 space-y-3">
+              {(() => {
+                const gallery =
+                  product.imageUrls && product.imageUrls.length > 0
+                    ? product.imageUrls
+                    : [product.imageUrl];
+                const currentImg = gallery[activeImageIndex] || product.imageUrl;
+                return (
+                  <>
+                    <div className="aspect-[4/3] rounded-xl overflow-hidden bg-zinc-100 border border-zinc-200">
+                      <ResilientImage
+                        src={currentImg}
+                        alt={product.name}
+                        fallbackLabel={product.name}
+                      />
+                    </div>
+                    {gallery.length > 1 && (
+                      <div className="grid grid-cols-5 gap-2">
+                        {gallery.map((imgUrl, idx) => (
+                          <button
+                            key={`${idx}-${imgUrl.slice(0, 24)}`}
+                            type="button"
+                            onClick={() => setActiveImageIndex(idx)}
+                            className={`aspect-square rounded-lg overflow-hidden border transition-all cursor-pointer ${
+                              activeImageIndex === idx
+                                ? 'border-zinc-950 ring-2 ring-zinc-950/20'
+                                : 'border-zinc-200 opacity-75 hover:opacity-100'
+                            }`}
+                          >
+                            <ResilientImage
+                              src={imgUrl}
+                              alt={`${product.name} ${idx + 1}`}
+                              className="w-full h-full object-cover"
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
 
             {/* Contiguous Purchase Module Right */}

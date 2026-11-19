@@ -87,7 +87,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'id', 'name', 'description', 'categoryId', 'categoryName',
-          'price', 'compareAtPrice', 'stock', 'sku', 'imageUrl', 'featured',
+          'price', 'compareAtPrice', 'stock', 'sku', 'imageUrl', 'imageUrls', 'featured',
           'expressEligible', 'ratingAvg', 'reviewCount', 'soldCount', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.id)
@@ -99,7 +99,15 @@ service cloud.firestore {
         && (!('compareAtPrice' in data) || (data.compareAtPrice is number && data.compareAtPrice >= 0 && data.compareAtPrice <= 10000000))
         && data.stock is number && data.stock >= 0 && data.stock <= 1000000
         && data.sku is string && data.sku.size() >= 1 && data.sku.size() <= 64
-        && data.imageUrl is string && data.imageUrl.size() >= 1 && data.imageUrl.size() <= 1000
+        && data.imageUrl is string && data.imageUrl.size() >= 1 && data.imageUrl.size() <= 250000
+        && (!('imageUrls' in data) || (
+          data.imageUrls is list
+          && data.imageUrls.size() >= 1
+          && data.imageUrls.size() <= 5
+          && data.imageUrls[0] is string
+          && data.imageUrls[0].size() >= 1
+          && data.imageUrls[0].size() <= 250000
+        ))
         && data.featured is bool
         && data.expressEligible is bool
         && data.ratingAvg is number && data.ratingAvg >= 0 && data.ratingAvg <= 5
@@ -308,7 +316,7 @@ service cloud.firestore {
         && (
           (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
             'name', 'description', 'categoryId', 'categoryName', 'price', 'compareAtPrice',
-            'stock', 'sku', 'imageUrl', 'featured', 'expressEligible', 'ratingAvg', 'reviewCount', 'soldCount', 'updatedAt'
+            'stock', 'sku', 'imageUrl', 'imageUrls', 'featured', 'expressEligible', 'ratingAvg', 'reviewCount', 'soldCount', 'updatedAt'
           ]))
           ||
           (isVerifiedUser()
