@@ -524,8 +524,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     { id: 'social', label: 'ফেসবুক ও সেটিংস', icon: <Share2 className="w-4 h-4" /> },
   ];
 
-  const filteredOrders =
-    orderFilter === 'all' ? orders : orders.filter((o) => o.status === orderFilter);
+  const productsById = useMemo(() => {
+    const map: Record<string, Product> = {};
+    products.forEach((p) => {
+      map[p.id] = p;
+    });
+    return map;
+  }, [products]);
+
+  const filteredOrders = useMemo(() => {
+    const list = orderFilter === 'all' ? orders : orders.filter((o) => o.status === orderFilter);
+    const getMillis = (val: unknown): number => {
+      if (!val || typeof val !== 'object') return 0;
+      const ts = val as { seconds?: number; toMillis?: () => number };
+      if (typeof ts.toMillis === 'function') return ts.toMillis();
+      if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+      return 0;
+    };
+    return [...list].sort((a, b) => getMillis(b.createdAt) - getMillis(a.createdAt));
+  }, [orders, orderFilter]);
 
   const maxCatRevenue = Math.max(1, ...analytics.categorySales.map((c) => c.revenue));
 
@@ -1210,6 +1227,58 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             </span>
                           </div>
                         </div>
+
+                        {/* Ordered Products List with Photos */}
+                        {ord.items && ord.items.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">
+                              অর্ডারকৃত পণ্য ({ord.items.length}টি আইটেম)
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                              {ord.items.map((item, idx) => {
+                                const catalogProd = productsById[item.productId];
+                                const itemImg =
+                                  item.imageUrl ||
+                                  catalogProd?.imageUrl ||
+                                  catalogProd?.imageUrls?.[0] ||
+                                  '';
+                                return (
+                                  <div
+                                    key={`${ord.id}-item-${item.productId}-${idx}`}
+                                    className="flex items-center gap-3 p-2.5 rounded-lg bg-zinc-50 border border-zinc-200/80"
+                                  >
+                                    <div className="w-14 h-14 rounded-md overflow-hidden bg-white border border-zinc-200 shrink-0">
+                                      <ResilientImage
+                                        src={itemImg}
+                                        alt={item.name}
+                                        className="w-full h-full object-cover"
+                                        fallbackLabel={item.name}
+                                      />
+                                    </div>
+                                    <div className="min-w-0 flex-1 space-y-0.5">
+                                      <p className="text-xs font-semibold text-zinc-950 truncate">
+                                        {item.name}
+                                      </p>
+                                      {catalogProd?.sku && (
+                                        <p className="text-[11px] font-mono-tabular text-zinc-400">
+                                          SKU: {catalogProd.sku}
+                                        </p>
+                                      )}
+                                      <div className="flex items-center justify-between gap-2 text-xs text-zinc-600 pt-0.5">
+                                        <span className="tabular-nums">
+                                          {item.quantity} × {formatBDT(item.price)}
+                                        </span>
+                                        <span className="font-semibold text-zinc-950 tabular-nums">
+                                          {formatBDT(item.price * item.quantity)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
 
                         <div className="text-xs text-zinc-600 flex flex-wrap items-center gap-4">
                           <span>পেমেন্ট: {PAYMENT_METHOD_LABELS[ord.paymentMethod]} ({PAYMENT_STATUS_LABELS[ord.paymentStatus]})</span>

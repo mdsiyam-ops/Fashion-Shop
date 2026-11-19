@@ -190,7 +190,7 @@ export const CartAndCheckoutModal: React.FC<CartAndCheckoutModalProps> = ({
         name: clampStr(item.product.name, 140),
         price: item.product.price,
         quantity: item.quantity,
-        imageUrl: clampStr(item.product.imageUrl, 250000),
+        imageUrl: clampStr(item.product.imageUrl || item.product.imageUrls?.[0] || '', 250000),
       })),
       subtotal,
       deliveryFee,
