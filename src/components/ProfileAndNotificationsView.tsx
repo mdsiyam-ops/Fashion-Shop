@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { User } from 'firebase/auth';
-import { doc, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
-import { Bell, Check, Lock, LogOut, ShieldCheck, User as UserIcon } from 'lucide-react';
+import { doc, getDoc, serverTimestamp, updateDoc, writeBatch } from 'firebase/firestore';
+import { Bell, Check, LogOut, ShieldCheck } from 'lucide-react';
 import { clampStr, db, handleFirestoreError, OperationType } from '../firebase';
 import { formatBDT, formatTimestamp, ORDER_STATUS_LABELS } from '../lib/format';
 import { AppNotification, DeliverySpeed, Order, UserPrivateProfile } from '../types';
+import { AuthPanel } from './AuthPanel';
 
 interface ProfileAndNotificationsViewProps {
   currentUser: User | null;
@@ -52,22 +53,28 @@ export const ProfileAndNotificationsView: React.FC<ProfileAndNotificationsViewPr
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser) return;
+    if (!currentUser || !currentUser.emailVerified) return;
     setSaving(true);
     setSavedNotice(false);
     try {
+      const userRef = doc(db, 'users', currentUser.uid);
+      const userSnap = await getDoc(userRef);
+      const cleanName = clampStr(displayName || 'গ্রাহক', 100);
       const batch = writeBatch(db);
-      batch.set(
-        doc(db, 'users', currentUser.uid),
-        {
+      if (!userSnap.exists()) {
+        batch.set(userRef, {
           uid: currentUser.uid,
-          displayName: clampStr(displayName || 'গ্রাহক', 100),
+          displayName: cleanName,
           role: isAdmin ? 'admin' : 'customer',
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
+        });
+      } else {
+        batch.update(userRef, {
+          displayName: cleanName,
+          updatedAt: serverTimestamp(),
+        });
+      }
 
       batch.set(
         doc(db, 'users', currentUser.uid, 'private', 'profile'),
@@ -118,29 +125,8 @@ export const ProfileAndNotificationsView: React.FC<ProfileAndNotificationsViewPr
 
   if (!currentUser) {
     return (
-      <div className="max-w-xl mx-auto px-4 py-16">
-        <div className="bg-white border border-zinc-200 rounded-xl p-8 text-center space-y-5">
-          <div className="w-12 h-12 rounded-full bg-zinc-100 flex items-center justify-center mx-auto">
-            <UserIcon className="w-6 h-6 text-zinc-700" />
-          </div>
-          <div className="space-y-2">
-            <h1 className="text-2xl font-bold text-zinc-950">গ্রাহক অ্যাকাউন্ট ও প্রোফাইল</h1>
-            <p className="text-sm text-zinc-600 leading-relaxed">
-              নিরাপদ গুগল লগইনের মাধ্যমে আপনার ডেলিভারি ঠিকানা সংরক্ষণ করুন, রিয়েল-টাইম অর্ডার নোটিফিকেশন পান এবং অর্ডার ইতিহাস দেখুন।
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onSignIn}
-            className="w-full py-3 px-5 bg-zinc-950 text-white text-sm font-semibold rounded-lg hover:bg-zinc-800 transition-colors cursor-pointer"
-          >
-            গুগল অ্যাকাউন্ট দিয়ে সাইন ইন করুন
-          </button>
-          <div className="pt-4 border-t border-zinc-200 flex items-center justify-center gap-2 text-xs text-zinc-500">
-            <Lock className="w-3.5 h-3.5 text-emerald-700" />
-            <span>আপনার ব্যক্তিগত তথ্য সম্পূর্ণ গোপনীয় ও শুধুমাত্র আপনার অ্যাকাউন্টে সীমাবদ্ধ</span>
-          </div>
-        </div>
+      <div className="max-w-md mx-auto px-4 py-12">
+        <AuthPanel />
       </div>
     );
   }
@@ -263,10 +249,14 @@ export const ProfileAndNotificationsView: React.FC<ProfileAndNotificationsViewPr
 
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || !currentUser.emailVerified}
               className="w-full py-2.5 px-4 bg-zinc-950 text-white text-sm font-semibold rounded-lg hover:bg-zinc-800 transition-colors disabled:opacity-50 cursor-pointer"
             >
-              {saving ? 'সংরক্ষণ হচ্ছে...' : 'প্রোফাইল আপডেট করুন'}
+              {saving
+                ? 'সংরক্ষণ হচ্ছে...'
+                : !currentUser.emailVerified
+                ? 'প্রথমে উপরের বার থেকে ইমেইল ভেরিফাই করুন'
+                : 'প্রোফাইল আপডেট করুন'}
             </button>
           </form>
         </div>

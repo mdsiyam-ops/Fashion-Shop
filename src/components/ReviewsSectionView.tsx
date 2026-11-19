@@ -53,6 +53,10 @@ export const ReviewsSectionView: React.FC<ReviewsSectionViewProps> = ({
       onRequireAuth();
       return;
     }
+    if (!currentUser.emailVerified) {
+      setSuccessMsg('রিভিউ জমা দেওয়ার আগে উপরের বার থেকে আপনার ইমেইল ভেরিফাই সম্পন্ন করুন।');
+      return;
+    }
     const targetProductId = selectedProductId || products[0]?.id;
     if (!targetProductId || !comment.trim()) return;
 

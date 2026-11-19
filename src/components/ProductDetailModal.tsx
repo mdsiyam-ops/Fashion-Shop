@@ -68,6 +68,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       onRequireAuth();
       return;
     }
+    if (!currentUser.emailVerified) {
+      setReviewFeedback('রিভিউ জমা দেওয়ার আগে উপরের বার থেকে আপনার ইমেইল ভেরিফাই সম্পন্ন করুন।');
+      return;
+    }
     const cleanComment = clampStr(commentInput, 1000);
     const cleanAuthor = clampStr(authorNameInput || currentUser.displayName || 'সম্মানিত গ্রাহক', 80);
     if (!cleanComment) return;

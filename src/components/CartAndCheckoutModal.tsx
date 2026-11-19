@@ -113,6 +113,10 @@ export const CartAndCheckoutModal: React.FC<CartAndCheckoutModalProps> = ({
       onRequireAuth();
       return;
     }
+    if (!currentUser.emailVerified) {
+      setGatewayError('অর্ডার সম্পন্ন করার আগে উপরের বার থেকে আপনার ইমেইল ভেরিফাই সম্পন্ন করুন।');
+      return;
+    }
     if (!customerName.trim() || customerPhone.trim().length < 6 || shippingAddress.trim().length < 3) {
       setGatewayError('অনুগ্রহ করে সঠিক নাম, ফোন নম্বর এবং পূর্ণাঙ্গ ডেলিভারি ঠিকানা দিন।');
       return;

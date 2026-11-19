@@ -162,11 +162,11 @@ export const Storefront: React.FC<StorefrontProps> = ({
             </div>
           </div>
 
-          <div className="lg:col-span-7 min-h-[280px] lg:min-h-[440px] bg-zinc-100">
+          <div className="lg:col-span-7 bg-black flex items-center justify-center overflow-hidden">
             <ResilientImage
               src={HERO_IMAGE_URL}
               alt="Fashion Shop ফ্ল্যাগশিপ সংগ্রহ"
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain"
               fallbackLabel="Fashion Shop সংগ্রহ"
             />
           </div>

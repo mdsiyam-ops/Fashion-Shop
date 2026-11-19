@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
+import { onIdTokenChanged, sendEmailVerification, signOut, User } from 'firebase/auth';
 import {
   collection,
   doc,
@@ -12,8 +12,9 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { Bell, X } from 'lucide-react';
+import { Bell, MailCheck, X } from 'lucide-react';
 import { AdminDashboard } from './components/AdminDashboard';
+import { AuthPanel } from './components/AuthPanel';
 import { CartAndCheckoutModal } from './components/CartAndCheckoutModal';
 import { ActiveTab, Navbar } from './components/Navbar';
 import { OrderTrackingView } from './components/OrderTrackingView';
@@ -26,7 +27,6 @@ import {
   auth,
   clampStr,
   db,
-  googleProvider,
   handleFirestoreError,
   OperationType,
 } from './firebase';
@@ -51,7 +51,9 @@ import {
 export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [authError, setAuthError] = useState('');
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [verifyFeedback, setVerifyFeedback] = useState('');
+  const [checkingVerify, setCheckingVerify] = useState(false);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('store');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -102,9 +104,16 @@ export default function App() {
 
   const isAdmin = Boolean(
     currentUser &&
-      currentUser.email === ADMIN_EMAIL &&
+      currentUser.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase() &&
       currentUser.emailVerified === true
   );
+
+  // Guard against non-admin users accessing admin tab
+  useEffect(() => {
+    if (activeTab === 'admin' && !isAdmin) {
+      setActiveTab('store');
+    }
+  }, [activeTab, isAdmin]);
 
   // Persist cart locally
   useEffect(() => {
@@ -115,21 +124,26 @@ export default function App() {
     }
   }, [cart]);
 
-  // Auth Listener
+  // Auth Listener (responds to sign-in, sign-out, and token refresh after email verification)
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
+    const unsub = onIdTokenChanged(auth, async (user) => {
       setCurrentUser(user);
       setAuthReady(true);
+      if (user) {
+        setAuthModalOpen(false);
+      }
       if (user && user.emailVerified) {
+        setVerifyFeedback('');
         try {
           const userRef = doc(db, 'users', user.uid);
           const snap = await getDoc(userRef);
           const displayName = clampStr(user.displayName || 'সম্মানিত গ্রাহক', 100);
+          const isAdminEmail = user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
           if (!snap.exists()) {
             await setDoc(userRef, {
               uid: user.uid,
               displayName,
-              role: user.email === ADMIN_EMAIL ? 'admin' : 'customer',
+              role: isAdminEmail ? 'admin' : 'customer',
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
             });
@@ -288,24 +302,33 @@ export default function App() {
     [fsProducts]
   );
 
-  const handleGoogleSignIn = async () => {
-    setAuthError('');
+  const openAuthModal = () => {
+    setAuthModalOpen(true);
+  };
+
+  const handleResendVerification = async () => {
+    if (!auth.currentUser) return;
     try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (error) {
-      const code = (error as { code?: string })?.code || '';
-      const msg = error instanceof Error ? error.message : '';
-      if (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
-        setAuthError(
-          `এই ডোমেইনটি (${window.location.hostname}) Firebase Authentication-এ অনুমোদিত নয়। Firebase Console → Authentication → Settings → Authorized domains-এ "${window.location.hostname}" যোগ করুন।`
-        );
-      } else {
-        setAuthError(
-          error instanceof Error
-            ? 'গুগল সাইন ইন সম্পন্ন করা যায়নি। অনুগ্রহ করে পপ-আপ ব্লকার বন্ধ রেখে আবার চেষ্টা করুন।'
-            : 'লগইন ত্রুটি হয়েছে।'
-        );
+      await sendEmailVerification(auth.currentUser);
+      setVerifyFeedback('ভেরিফিকেশন লিংক আপনার জিমেইল ইনবক্সে পাঠানো হয়েছে।');
+    } catch {
+      setVerifyFeedback('কিছুক্ষণ অপেক্ষা করে আবার ভেরিফিকেশন ইমেইল পাঠান।');
+    }
+  };
+
+  const handleRefreshVerification = async () => {
+    if (!auth.currentUser) return;
+    setCheckingVerify(true);
+    try {
+      await auth.currentUser.reload();
+      await auth.currentUser.getIdToken(true);
+      if (!auth.currentUser.emailVerified) {
+        setVerifyFeedback('ইমেইল এখনো ভেরিফাই হয়নি। অনুগ্রহ করে ইনবক্সের লিংকে ক্লিক করে আবার যাচাই করুন।');
       }
+    } catch {
+      setVerifyFeedback('স্ট্যাটাস রিফ্রেশ করা যায়নি। আবার চেষ্টা করুন।');
+    } finally {
+      setCheckingVerify(false);
     }
   };
 
@@ -352,6 +375,7 @@ export default function App() {
       <Navbar
         storeName={settings.storeName}
         activeTab={activeTab}
+        isAdmin={isAdmin}
         onSelectTab={setActiveTab}
         cartCount={cartCount}
         unreadNotifications={unreadNotifCount}
@@ -361,16 +385,35 @@ export default function App() {
         }}
       />
 
-      {authError && (
-        <div className="bg-rose-50 border-b border-rose-200 px-4 py-2.5 text-xs text-rose-700 flex items-center justify-between">
-          <span>{authError}</span>
-          <button
-            type="button"
-            onClick={() => setAuthError('')}
-            className="text-rose-700 hover:text-rose-900 cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
+      {/* Email Verification Prompt for newly created Email/Password accounts */}
+      {currentUser && !currentUser.emailVerified && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 text-xs text-amber-900">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start sm:items-center gap-2">
+              <MailCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5 sm:mt-0" />
+              <span>
+                অর্ডার, রিভিউ ও সম্পূর্ণ অ্যাকাউন্ট সুবিধা চালু করতে আপনার ইমেইল (
+                <strong>{currentUser.email}</strong>) ভেরিফাই করুন। {verifyFeedback}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => void handleResendVerification()}
+                className="px-3 py-1.5 bg-white border border-amber-300 rounded-md font-semibold text-amber-900 hover:bg-amber-100 cursor-pointer"
+              >
+                লিংক পুনরায় পাঠান
+              </button>
+              <button
+                type="button"
+                disabled={checkingVerify}
+                onClick={() => void handleRefreshVerification()}
+                className="px-3 py-1.5 bg-zinc-950 text-white rounded-md font-semibold hover:bg-zinc-800 disabled:opacity-50 cursor-pointer"
+              >
+                {checkingVerify ? 'যাচাই হচ্ছে...' : 'ভেরিফাই সম্পন্ন করেছি'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -424,7 +467,7 @@ export default function App() {
             initialTrackingCode={trackingCodeFocus}
             currentUser={currentUser}
             userOrders={userOrders}
-            onRequireAuth={() => void handleGoogleSignIn()}
+            onRequireAuth={openAuthModal}
           />
         )}
 
@@ -433,7 +476,7 @@ export default function App() {
             products={activeProducts}
             reviews={activeReviews}
             currentUser={currentUser}
-            onRequireAuth={() => void handleGoogleSignIn()}
+            onRequireAuth={openAuthModal}
             onSelectProduct={setSelectedProduct}
           />
         )}
@@ -445,7 +488,7 @@ export default function App() {
             privateProfile={privateProfile}
             notifications={notifications}
             userOrders={userOrders}
-            onSignIn={() => void handleGoogleSignIn()}
+            onSignIn={openAuthModal}
             onSignOut={() => void handleSignOut()}
             onTrackOrder={(code) => {
               setTrackingCodeFocus(code);
@@ -454,7 +497,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'admin' && (
+        {activeTab === 'admin' && isAdmin && (
           <AdminDashboard
             currentUser={currentUser}
             isAdmin={isAdmin}
@@ -463,7 +506,7 @@ export default function App() {
             orders={adminOrders}
             settings={settings}
             hasFirestoreProducts={fsProducts.length > 0}
-            onRequireAuth={() => void handleGoogleSignIn()}
+            onRequireAuth={openAuthModal}
           />
         )}
       </div>
@@ -520,7 +563,7 @@ export default function App() {
         onClose={() => setSelectedProduct(null)}
         onAddToCart={handleAddToCart}
         onBuyNow={handleBuyNow}
-        onRequireAuth={() => void handleGoogleSignIn()}
+        onRequireAuth={openAuthModal}
       />
 
       <CartAndCheckoutModal
@@ -536,12 +579,27 @@ export default function App() {
         onUpdateQty={handleUpdateCartQty}
         onRemoveItem={(id) => setCart((prev) => prev.filter((c) => c.product.id !== id))}
         onClearCart={() => setCart([])}
-        onRequireAuth={() => void handleGoogleSignIn()}
+        onRequireAuth={openAuthModal}
         onOrderSuccess={(code) => {
           setTrackingCodeFocus(code);
           setActiveTab('tracking');
         }}
       />
+
+      {authModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-zinc-950/50 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          aria-label="অ্যাকাউন্ট লগইন ও নিবন্ধন"
+        >
+          <AuthPanel
+            isModal
+            onSuccess={() => setAuthModalOpen(false)}
+            onClose={() => setAuthModalOpen(false)}
+          />
+        </div>
+      )}
     </div>
   );
 }

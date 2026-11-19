@@ -18,7 +18,8 @@ import productAmberFragranceImg from '../assets/images/product_amber_fragrance_1
 import productCeramicLampImg from '../assets/images/product_ceramic_lamp_1795062468114.jpg';
 import productLeatherToteImg from '../assets/images/product_leather_tote_1795062468753.jpg';
 
-export const HERO_IMAGE_URL = heroAtelierImg;
+export const HERO_IMAGE_URL =
+  './assets/aistudio/WhatsApp_Image_2026-11-19_at_12.07.35_0b9b29f8.jpeg';
 
 export const STUDIO_IMAGE_GALLERY = [
   {

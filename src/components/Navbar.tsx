@@ -6,6 +6,7 @@ export type ActiveTab = 'store' | 'tracking' | 'reviews' | 'profile' | 'admin';
 interface NavbarProps {
   storeName: string;
   activeTab: ActiveTab;
+  isAdmin: boolean;
   onSelectTab: (tab: ActiveTab) => void;
   cartCount: number;
   unreadNotifications: number;
@@ -15,6 +16,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   storeName,
   activeTab,
+  isAdmin,
   onSelectTab,
   cartCount,
   unreadNotifications,
@@ -30,7 +32,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       id: 'profile',
       label: unreadNotifications > 0 ? `প্রোফাইল (${unreadNotifications})` : 'প্রোফাইল',
     },
-    { id: 'admin', label: 'অ্যাডমিন' },
+    ...(isAdmin ? [{ id: 'admin' as ActiveTab, label: 'অ্যাডমিন' }] : []),
   ];
 
   const handleNavClick = (tab: ActiveTab) => {
