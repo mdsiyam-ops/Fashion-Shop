@@ -405,7 +405,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  const fbShopNowLink = `${window.location.origin}/?source=fb_shop_now`;
+  const fbShopNowLink = `${window.location.origin}${window.location.pathname}?source=fb_shop_now`;
 
   const handleCopyFbLink = async () => {
     try {

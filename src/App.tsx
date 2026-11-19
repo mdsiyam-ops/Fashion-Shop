@@ -293,11 +293,19 @@ export default function App() {
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (error) {
-      setAuthError(
-        error instanceof Error
-          ? 'গুগল সাইন ইন সম্পন্ন করা যায়নি। অনুগ্রহ করে পপ-আপ ব্লকার বন্ধ রেখে আবার চেষ্টা করুন।'
-          : 'লগইন ত্রুটি হয়েছে।'
-      );
+      const code = (error as { code?: string })?.code || '';
+      const msg = error instanceof Error ? error.message : '';
+      if (code === 'auth/unauthorized-domain' || msg.includes('unauthorized-domain')) {
+        setAuthError(
+          `এই ডোমেইনটি (${window.location.hostname}) Firebase Authentication-এ অনুমোদিত নয়। Firebase Console → Authentication → Settings → Authorized domains-এ "${window.location.hostname}" যোগ করুন।`
+        );
+      } else {
+        setAuthError(
+          error instanceof Error
+            ? 'গুগল সাইন ইন সম্পন্ন করা যায়নি। অনুগ্রহ করে পপ-আপ ব্লকার বন্ধ রেখে আবার চেষ্টা করুন।'
+            : 'লগইন ত্রুটি হয়েছে।'
+        );
+      }
     }
   };
 
