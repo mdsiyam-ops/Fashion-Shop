@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { User } from 'firebase/auth';
 import { deleteDoc, doc, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import {
@@ -94,6 +94,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [expFeeInput, setExpFeeInput] = useState(String(settings.expressDeliveryFee));
   const [savedSettingsFlag, setSavedSettingsFlag] = useState(false);
   const [copiedFbLink, setCopiedFbLink] = useState(false);
+
+  useEffect(() => {
+    setStoreNameInput(settings.storeName);
+    setTaglineInput(settings.tagline);
+    setFbUrlInput(settings.facebookUrl);
+    setMessengerInput(settings.messengerUrl);
+    setWhatsappInput(settings.whatsappNumber);
+    setIgInput(settings.instagramUrl);
+    setFreeThresholdInput(String(settings.freeDeliveryThreshold));
+    setStdFeeInput(String(settings.standardDeliveryFee));
+    setExpFeeInput(String(settings.expressDeliveryFee));
+  }, [settings]);
 
   // Analytics Computations
   const analytics = useMemo(() => {
@@ -234,6 +246,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
 
     try {
+      if (!hasFirestoreProducts) {
+        await seedInitialStoreData(currentUser.uid);
+      }
       if (editingProductId) {
         await updateDoc(doc(db, 'products', id), payload);
       } else {
@@ -258,6 +273,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const newPrice = Math.max(0, Number(draft.price) || p.price);
     const newStock = Math.max(0, Math.floor(Number(draft.stock) || 0));
     try {
+      if (!hasFirestoreProducts) {
+        await seedInitialStoreData(currentUser.uid);
+      }
       await updateDoc(doc(db, 'products', p.id), {
         price: newPrice,
         stock: newStock,
