@@ -28,15 +28,17 @@ import {
   clampStr,
   db,
   handleFirestoreError,
+  isQuotaExceededError,
   isVerifiedCustomer,
   OperationType,
 } from './firebase';
 import {
   DEFAULT_STORE_SETTINGS,
+  purgeDemoDataFromFirestore,
   seedInitialStoreData,
   STARTER_CATEGORIES,
-  STARTER_PRODUCTS,
-  STARTER_REVIEWS,
+  STARTER_PRODUCT_IDS,
+  STARTER_REVIEW_IDS,
 } from './lib/seedData';
 import {
   AppNotification,
@@ -62,11 +64,48 @@ export default function App() {
   const [checkoutInitialStep, setCheckoutInitialStep] = useState<'cart' | 'checkout'>('cart');
   const [trackingCodeFocus, setTrackingCodeFocus] = useState('');
 
-  const [fsCategories, setFsCategories] = useState<Category[]>([]);
-  const [fsProducts, setFsProducts] = useState<Product[]>([]);
+  const [fsCategories, setFsCategories] = useState<Category[]>(() => {
+    try {
+      const raw = localStorage.getItem('fashion_shop_categories_cache_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed as Category[];
+      }
+    } catch {
+      // ignore cache read errors
+    }
+    return [];
+  });
+  const [fsProducts, setFsProducts] = useState<Product[]>(() => {
+    try {
+      const raw = localStorage.getItem('fashion_shop_products_cache_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return (parsed as Product[]).filter((p) => !STARTER_PRODUCT_IDS.has(p.id));
+        }
+      }
+    } catch {
+      // ignore cache read errors
+    }
+    return [];
+  });
   const [productsLoaded, setProductsLoaded] = useState(false);
+  const [firestoreIssue, setFirestoreIssue] = useState<'quota' | 'network' | null>(null);
+  const [listenerEpoch, setListenerEpoch] = useState(0);
   const [fsReviews, setFsReviews] = useState<Review[]>([]);
-  const [settings, setSettings] = useState<StoreSettings>(DEFAULT_STORE_SETTINGS);
+  const [settings, setSettings] = useState<StoreSettings>(() => {
+    try {
+      const raw = localStorage.getItem('fashion_shop_settings_cache_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<StoreSettings>;
+        return { ...DEFAULT_STORE_SETTINGS, ...parsed };
+      }
+    } catch {
+      // ignore cache read errors
+    }
+    return DEFAULT_STORE_SETTINGS;
+  });
   const [privateProfile, setPrivateProfile] = useState<UserPrivateProfile | null>(null);
   const [userOrders, setUserOrders] = useState<Order[]>([]);
   const [adminOrders, setAdminOrders] = useState<Order[]>([]);
@@ -101,6 +140,7 @@ export default function App() {
   }, []);
 
   const seededRef = useRef(false);
+  const purgedDemoRef = useRef(false);
   const seenNotifIdsRef = useRef<Set<string>>(new Set());
 
   const isAdmin = Boolean(
@@ -167,23 +207,66 @@ export default function App() {
 
   // Public Storefront Subscriptions (Categories, Products, Reviews, Settings)
   useEffect(() => {
+    let resolvedProducts = false;
+
+    const loadingTimeout = window.setTimeout(() => {
+      if (!resolvedProducts) {
+        setProductsLoaded(true);
+        setFirestoreIssue((prev) => prev ?? 'network');
+      }
+    }, 6000);
+
+    const handlePublicListenerError = (err: unknown, op: OperationType, path: string) => {
+      if (path === 'products') {
+        resolvedProducts = true;
+        setProductsLoaded(true);
+      }
+      if (isQuotaExceededError(err)) {
+        setFirestoreIssue('quota');
+        return;
+      }
+      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+      if (msg.includes('permission') || msg.includes('insufficient')) {
+        handleFirestoreError(err, op, path);
+        return;
+      }
+      setFirestoreIssue((prev) => prev ?? 'network');
+    };
+
     const unsubCats = onSnapshot(
       collection(db, 'categories'),
       (snap) => {
         const list = snap.docs.map((d) => d.data() as Category);
         setFsCategories(list);
+        try {
+          localStorage.setItem('fashion_shop_categories_cache_v1', JSON.stringify(list));
+        } catch {
+          // ignore storage quota errors
+        }
       },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'categories')
+      (err) => handlePublicListenerError(err, OperationType.LIST, 'categories')
     );
 
     const unsubProds = onSnapshot(
       collection(db, 'products'),
       (snap) => {
+        resolvedProducts = true;
+        window.clearTimeout(loadingTimeout);
         const list = snap.docs.map((d) => d.data() as Product);
         setFsProducts(list);
         setProductsLoaded(true);
+        setFirestoreIssue(null);
+        try {
+          const cleanCache = list.filter((p) => !STARTER_PRODUCT_IDS.has(p.id));
+          localStorage.setItem('fashion_shop_products_cache_v1', JSON.stringify(cleanCache));
+        } catch {
+          // ignore storage quota errors
+        }
       },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'products')
+      (err) => {
+        window.clearTimeout(loadingTimeout);
+        handlePublicListenerError(err, OperationType.LIST, 'products');
+      }
     );
 
     const unsubRevs = onSnapshot(
@@ -192,7 +275,7 @@ export default function App() {
         const list = snap.docs.map((d) => d.data() as Review);
         setFsReviews(list);
       },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'reviews')
+      (err) => handlePublicListenerError(err, OperationType.LIST, 'reviews')
     );
 
     const unsubSettings = onSnapshot(
@@ -204,50 +287,68 @@ export default function App() {
             ...DEFAULT_STORE_SETTINGS,
             ...data,
           };
-          if (merged.storeName === 'শৈলী স্টোর') {
-            setSettings({
-              ...merged,
-              storeName: 'Fashion Shop',
-              standardDeliveryFee: 80,
-              expressDeliveryFee: 120,
-            });
-          } else {
-            setSettings(merged);
+          const normalized =
+            merged.storeName === 'শৈলী স্টোর'
+              ? {
+                  ...merged,
+                  storeName: 'Fashion Shop',
+                  standardDeliveryFee: 80,
+                  expressDeliveryFee: 120,
+                }
+              : merged;
+          setSettings(normalized);
+          try {
+            localStorage.setItem('fashion_shop_settings_cache_v1', JSON.stringify(normalized));
+          } catch {
+            // ignore storage quota errors
           }
         }
       },
-      (err) => handleFirestoreError(err, OperationType.GET, 'settings/store')
+      (err) => handlePublicListenerError(err, OperationType.GET, 'settings/store')
     );
 
     return () => {
+      window.clearTimeout(loadingTimeout);
       unsubCats();
       unsubProds();
       unsubRevs();
       unsubSettings();
     };
-  }, []);
+  }, [listenerEpoch]);
 
-  // Auto-seed starter catalog once when admin signs in and Firestore products are confirmed empty (unless demo products were intentionally cleared)
+  // Automatically purge any leftover starter demo products/reviews from Firestore when Admin connects
   useEffect(() => {
-    let demoCleared = false;
-    try {
-      demoCleared = localStorage.getItem('fashion_shop_demo_cleared_v1') === 'true';
-    } catch {
-      demoCleared = false;
+    if (!authReady || !productsLoaded || !isAdmin || !currentUser || purgedDemoRef.current) {
+      return;
     }
+    const prodIds = fsProducts.map((p) => p.id);
+    const revIds = fsReviews.map((r) => r.id);
+    const hasDemoProds = prodIds.some((id) => STARTER_PRODUCT_IDS.has(id));
+    const hasDemoRevs = revIds.some((id) => STARTER_REVIEW_IDS.has(id));
+    if (hasDemoProds || hasDemoRevs) {
+      purgedDemoRef.current = true;
+      void purgeDemoDataFromFirestore(prodIds, revIds).catch(() => {
+        purgedDemoRef.current = false;
+      });
+    }
+  }, [authReady, productsLoaded, isAdmin, currentUser, fsProducts, fsReviews]);
+
+  // Ensure initial categories & store settings exist (without seeding any demo products)
+  useEffect(() => {
     if (
       authReady &&
       productsLoaded &&
       isAdmin &&
       currentUser &&
-      fsProducts.length === 0 &&
-      !demoCleared &&
+      fsCategories.length === 0 &&
       !seededRef.current
     ) {
       seededRef.current = true;
-      void seedInitialStoreData(currentUser.uid);
+      void seedInitialStoreData(currentUser.uid).catch(() => {
+        seededRef.current = false;
+      });
     }
-  }, [authReady, productsLoaded, isAdmin, currentUser, fsProducts.length]);
+  }, [authReady, productsLoaded, isAdmin, currentUser, fsCategories.length]);
 
   // Authenticated Private Profile, Orders & Real-Time Notifications Subscriptions
   useEffect(() => {
@@ -312,31 +413,18 @@ export default function App() {
     };
   }, [authReady, currentUser, isAdmin]);
 
-  let demoClearedFlag = false;
-  try {
-    demoClearedFlag = localStorage.getItem('fashion_shop_demo_cleared_v1') === 'true';
-  } catch {
-    demoClearedFlag = false;
-  }
-
   const activeCategories = fsCategories.length > 0 ? fsCategories : STARTER_CATEGORIES;
-  const activeProducts = !productsLoaded
-    ? []
-    : fsProducts.length > 0
-    ? fsProducts
-    : demoClearedFlag
-    ? []
-    : STARTER_PRODUCTS;
-  const activeReviews = !productsLoaded
-    ? []
-    : fsReviews.length > 0
-    ? fsReviews
-    : demoClearedFlag
-    ? []
-    : STARTER_REVIEWS;
-  const firestoreProductIds = useMemo(
-    () => new Set(fsProducts.map((p) => p.id)),
+  const activeProducts = useMemo(
+    () => fsProducts.filter((p) => !STARTER_PRODUCT_IDS.has(p.id)),
     [fsProducts]
+  );
+  const activeReviews = useMemo(
+    () => fsReviews.filter((r) => !STARTER_REVIEW_IDS.has(r.id)),
+    [fsReviews]
+  );
+  const firestoreProductIds = useMemo(
+    () => new Set(activeProducts.map((p) => p.id)),
+    [activeProducts]
   );
 
   const openAuthModal = () => {
@@ -489,6 +577,12 @@ export default function App() {
           <Storefront
             products={activeProducts}
             productsLoaded={productsLoaded}
+            firestoreIssue={firestoreIssue}
+            onRetryConnection={() => {
+              setFirestoreIssue(null);
+              setProductsLoaded(false);
+              setListenerEpoch((e) => e + 1);
+            }}
             categories={activeCategories}
             reviews={activeReviews}
             settings={settings}
@@ -543,7 +637,7 @@ export default function App() {
             categories={activeCategories}
             orders={adminOrders}
             settings={settings}
-            hasFirestoreProducts={fsProducts.length > 0}
+            hasFirestoreProducts={activeProducts.length > 0}
             onRequireAuth={openAuthModal}
           />
         )}

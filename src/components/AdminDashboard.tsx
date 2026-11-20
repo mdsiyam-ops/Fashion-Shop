@@ -30,7 +30,6 @@ import {
 import { compressImageFileToDataUrl } from '../lib/imageUpload';
 import {
   ensureCategoryInFirestore,
-  seedInitialStoreData,
   STARTER_PRODUCT_IDS,
   STUDIO_IMAGE_GALLERY,
 } from '../lib/seedData';
@@ -191,14 +190,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
   }
 
-  const handleSeedDatabase = async () => {
-    setSeeding(true);
-    try {
-      await seedInitialStoreData(currentUser.uid);
-    } finally {
-      setSeeding(false);
-    }
-  };
+  // Quick inline edit handler
 
   const openCreateProduct = () => {
     setEditingProductId(null);
@@ -357,9 +349,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const newPrice = Math.max(0, Number(draft.price) || p.price);
     const newStock = Math.max(0, Math.floor(Number(draft.stock) || 0));
     try {
-      if (!hasFirestoreProducts) {
-        await seedInitialStoreData(currentUser.uid);
-      }
       await updateDoc(doc(db, 'products', p.id), {
         price: newPrice,
         stock: newStock,
@@ -608,16 +597,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <h1 className="text-2xl font-bold text-zinc-950">স্টোর অপারেশন ও বিশ্লেষণ</h1>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {!hasFirestoreProducts && (
-            <button
-              type="button"
-              disabled={seeding}
-              onClick={() => void handleSeedDatabase()}
-              className="px-4 py-2 bg-emerald-700 text-white text-xs font-semibold rounded-lg hover:bg-emerald-800 cursor-pointer whitespace-nowrap"
-            >
-              {seeding ? 'ডাটাবেজে সেভ হচ্ছে...' : 'স্টার্টার ক্যাটালগ ডাটাবেজে সেভ করুন'}
-            </button>
-          )}
           <button
             type="button"
             onClick={handleDownloadCsv}

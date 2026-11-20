@@ -18,6 +18,8 @@ import { ResilientImage } from './ResilientImage';
 interface StorefrontProps {
   products: Product[];
   productsLoaded: boolean;
+  firestoreIssue?: 'quota' | 'network' | null;
+  onRetryConnection?: () => void;
   categories: Category[];
   reviews: Review[];
   settings: StoreSettings;
@@ -31,10 +33,12 @@ interface StorefrontProps {
 export const Storefront: React.FC<StorefrontProps> = ({
   products,
   productsLoaded,
+  firestoreIssue = null,
+  onRetryConnection,
   categories,
   reviews,
   settings,
-  trafficSource,
+  trafficSource: _trafficSource,
   onSelectProduct,
   onAddToCart,
   onBuyNow,
@@ -326,25 +330,53 @@ export const Storefront: React.FC<StorefrontProps> = ({
               </div>
             ))}
           </div>
+        ) : firestoreIssue && products.length === 0 ? (
+          <div className="bg-white border border-amber-200 rounded-xl p-10 text-center space-y-3">
+            <p className="text-base font-semibold text-zinc-950">
+              {firestoreIssue === 'quota'
+                ? 'ডাটাবেজের দৈনিক ফ্রি লিমিট সাময়িকভাবে শেষ হয়েছে'
+                : 'সার্ভারের সাথে সংযোগ করতে সমস্যা হচ্ছে'}
+            </p>
+            <p className="text-sm text-zinc-600 max-w-md mx-auto leading-relaxed">
+              {firestoreIssue === 'quota'
+                ? 'Firebase Firestore-এর আজকের ফ্রি রিড কোটা পূর্ণ হয়ে গেছে। কোটা রিসেট হলে অথবা প্ল্যান আপগ্রেড করলে সকল পণ্য পুনরায় প্রদর্শিত হবে।'
+                : 'ইন্টারনেট সংযোগ পরীক্ষা করুন অথবা পুনরায় চেষ্টা করুন।'}
+            </p>
+            {onRetryConnection && (
+              <button
+                type="button"
+                onClick={onRetryConnection}
+                className="px-4 py-2 bg-zinc-950 text-white text-xs font-semibold rounded-lg hover:bg-zinc-800 cursor-pointer"
+              >
+                আবার চেষ্টা করুন
+              </button>
+            )}
+          </div>
         ) : filteredProducts.length === 0 ? (
           <div className="bg-white border border-zinc-200 rounded-xl p-12 text-center space-y-3">
-            <p className="text-base font-semibold text-zinc-900">কোনো পণ্য পাওয়া যায়নি</p>
-            <p className="text-sm text-zinc-500">
-              অন্য ক্যাটাগরি অথবা ভিন্ন কীওয়ার্ড দিয়ে আবার খুঁজে দেখুন।
+            <p className="text-base font-semibold text-zinc-900">
+              {products.length === 0 ? 'এখনো কোনো পণ্য যুক্ত করা হয়নি' : 'কোনো পণ্য পাওয়া যায়নি'}
             </p>
-            <button
-              type="button"
-              onClick={() => {
-                setSearchQuery('');
-                setSelectedCategoryId('all');
-                setPriceRange('all');
-                setExpressOnly(false);
-                setInStockOnly(false);
-              }}
-              className="px-4 py-2 bg-zinc-950 text-white text-xs font-medium rounded-lg hover:bg-zinc-800 cursor-pointer"
-            >
-              সব ফিল্টার রিসেট করুন
-            </button>
+            <p className="text-sm text-zinc-500">
+              {products.length === 0
+                ? 'অ্যাডমিন প্যানেল থেকে নতুন পণ্য যুক্ত করলে এখানে প্রদর্শিত হবে।'
+                : 'অন্য ক্যাটাগরি অথবা ভিন্ন কীওয়ার্ড দিয়ে আবার খুঁজে দেখুন।'}
+            </p>
+            {products.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setSelectedCategoryId('all');
+                  setPriceRange('all');
+                  setExpressOnly(false);
+                  setInStockOnly(false);
+                }}
+                className="px-4 py-2 bg-zinc-950 text-white text-xs font-medium rounded-lg hover:bg-zinc-800 cursor-pointer"
+              >
+                সব ফিল্টার রিসেট করুন
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
