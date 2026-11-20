@@ -11,12 +11,13 @@ import {
   X,
 } from 'lucide-react';
 import { formatBDT } from '../lib/format';
-import { HERO_IMAGE_URL } from '../lib/seedData';
+import { HERO_IMAGE_URL, STARTER_PRODUCT_IDS } from '../lib/seedData';
 import { Category, Product, Review, StoreSettings } from '../types';
 import { ResilientImage } from './ResilientImage';
 
 interface StorefrontProps {
   products: Product[];
+  productsLoaded: boolean;
   categories: Category[];
   reviews: Review[];
   settings: StoreSettings;
@@ -29,6 +30,7 @@ interface StorefrontProps {
 
 export const Storefront: React.FC<StorefrontProps> = ({
   products,
+  productsLoaded,
   categories,
   reviews,
   settings,
@@ -79,11 +81,15 @@ export const Storefront: React.FC<StorefrontProps> = ({
       return true;
     });
 
-    const getCreatedSeconds = (val: unknown): number => {
-      if (!val || typeof val !== 'object') return 0;
-      const ts = val as { seconds?: number; toMillis?: () => number };
-      if (typeof ts.toMillis === 'function') return ts.toMillis();
-      if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+    const getProductEpoch = (p: Product): number => {
+      const val = p.createdAt;
+      if (val && typeof val === 'object') {
+        const ts = val as { seconds?: number; toMillis?: () => number };
+        if (typeof ts.toMillis === 'function') return ts.toMillis();
+        if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+      }
+      const match = p.id.match(/^prod_(\d+)$/);
+      if (match) return Number(match[1]) || 0;
       return 0;
     };
 
@@ -98,7 +104,12 @@ export const Storefront: React.FC<StorefrontProps> = ({
       if (sortBy === 'popular') {
         return b.soldCount - a.soldCount;
       }
-      const timeDiff = getCreatedSeconds(b.createdAt) - getCreatedSeconds(a.createdAt);
+      // Custom admin-added products always appear first ahead of starter demo products
+      const aIsDemo = STARTER_PRODUCT_IDS.has(a.id) ? 1 : 0;
+      const bIsDemo = STARTER_PRODUCT_IDS.has(b.id) ? 1 : 0;
+      if (aIsDemo !== bIsDemo) return aIsDemo - bIsDemo;
+
+      const timeDiff = getProductEpoch(b) - getProductEpoch(a);
       if (timeDiff !== 0) return timeDiff;
       return b.soldCount - a.soldCount;
     });
@@ -299,7 +310,23 @@ export const Storefront: React.FC<StorefrontProps> = ({
         </div>
 
         {/* 3-Column Product Grid */}
-        {filteredProducts.length === 0 ? (
+        {!productsLoaded && products.length === 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
+            {[0, 1, 2].map((skeletonIdx) => (
+              <div
+                key={skeletonIdx}
+                className="bg-white border border-zinc-200 rounded-xl overflow-hidden animate-pulse"
+              >
+                <div className="aspect-[4/3] bg-zinc-200" />
+                <div className="p-5 space-y-3">
+                  <div className="h-3 w-24 bg-zinc-200 rounded" />
+                  <div className="h-4 w-3/4 bg-zinc-200 rounded" />
+                  <div className="h-5 w-1/3 bg-zinc-200 rounded" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : filteredProducts.length === 0 ? (
           <div className="bg-white border border-zinc-200 rounded-xl p-12 text-center space-y-3">
             <p className="text-base font-semibold text-zinc-900">কোনো পণ্য পাওয়া যায়নি</p>
             <p className="text-sm text-zinc-500">

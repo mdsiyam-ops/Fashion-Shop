@@ -227,9 +227,23 @@ export default function App() {
     };
   }, []);
 
-  // Auto-seed starter catalog once when admin signs in and Firestore products are confirmed empty
+  // Auto-seed starter catalog once when admin signs in and Firestore products are confirmed empty (unless demo products were intentionally cleared)
   useEffect(() => {
-    if (authReady && productsLoaded && isAdmin && currentUser && fsProducts.length === 0 && !seededRef.current) {
+    let demoCleared = false;
+    try {
+      demoCleared = localStorage.getItem('fashion_shop_demo_cleared_v1') === 'true';
+    } catch {
+      demoCleared = false;
+    }
+    if (
+      authReady &&
+      productsLoaded &&
+      isAdmin &&
+      currentUser &&
+      fsProducts.length === 0 &&
+      !demoCleared &&
+      !seededRef.current
+    ) {
       seededRef.current = true;
       void seedInitialStoreData(currentUser.uid);
     }
@@ -298,9 +312,28 @@ export default function App() {
     };
   }, [authReady, currentUser, isAdmin]);
 
+  let demoClearedFlag = false;
+  try {
+    demoClearedFlag = localStorage.getItem('fashion_shop_demo_cleared_v1') === 'true';
+  } catch {
+    demoClearedFlag = false;
+  }
+
   const activeCategories = fsCategories.length > 0 ? fsCategories : STARTER_CATEGORIES;
-  const activeProducts = fsProducts.length > 0 ? fsProducts : STARTER_PRODUCTS;
-  const activeReviews = fsReviews.length > 0 ? fsReviews : STARTER_REVIEWS;
+  const activeProducts = !productsLoaded
+    ? []
+    : fsProducts.length > 0
+    ? fsProducts
+    : demoClearedFlag
+    ? []
+    : STARTER_PRODUCTS;
+  const activeReviews = !productsLoaded
+    ? []
+    : fsReviews.length > 0
+    ? fsReviews
+    : demoClearedFlag
+    ? []
+    : STARTER_REVIEWS;
   const firestoreProductIds = useMemo(
     () => new Set(fsProducts.map((p) => p.id)),
     [fsProducts]
@@ -455,6 +488,7 @@ export default function App() {
         {activeTab === 'store' && (
           <Storefront
             products={activeProducts}
+            productsLoaded={productsLoaded}
             categories={activeCategories}
             reviews={activeReviews}
             settings={settings}

@@ -28,7 +28,12 @@ import {
   PAYMENT_STATUS_LABELS,
 } from '../lib/format';
 import { compressImageFileToDataUrl } from '../lib/imageUpload';
-import { seedInitialStoreData, STUDIO_IMAGE_GALLERY } from '../lib/seedData';
+import {
+  ensureCategoryInFirestore,
+  seedInitialStoreData,
+  STARTER_PRODUCT_IDS,
+  STUDIO_IMAGE_GALLERY,
+} from '../lib/seedData';
 import { Category, Order, OrderStatus, Product, StoreSettings } from '../types';
 import { ResilientImage } from './ResilientImage';
 
@@ -321,9 +326,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     setSavingProductForm(true);
     try {
-      if (!hasFirestoreProducts) {
-        await seedInitialStoreData(currentUser.uid);
-      }
+      await ensureCategoryInFirestore(cat);
       if (editingProductId) {
         await updateDoc(doc(db, 'products', id), basePayload);
         setProductSuccessMsg('পণ্যটি সফলভাবে আপডেট হয়ে ওয়েবসাইটে প্রকাশিত হয়েছে।');
@@ -379,6 +382,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       await deleteDoc(doc(db, 'products', productId));
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `products/${productId}`);
+    }
+  };
+
+  const handleDeleteAllDemoProducts = async () => {
+    const demoProds = products.filter((p) => STARTER_PRODUCT_IDS.has(p.id));
+    if (demoProds.length === 0) return;
+    setSeeding(true);
+    try {
+      try {
+        localStorage.setItem('fashion_shop_demo_cleared_v1', 'true');
+      } catch {
+        // ignore storage errors
+      }
+      if (hasFirestoreProducts) {
+        const batch = writeBatch(db);
+        demoProds.forEach((p) => {
+          batch.delete(doc(db, 'products', p.id));
+        });
+        await batch.commit();
+      }
+      setProductSuccessMsg('সকল ডেমো পণ্য মুছে ফেলা হয়েছে। এখন শুধু আপনার যুক্ত করা পণ্যগুলো প্রদর্শিত হবে।');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'মুছে ফেলা যায়নি';
+      setProductFormError(`ডেমো পণ্য মুছতে সমস্যা হয়েছে (${msg})।`);
+    } finally {
+      setSeeding(false);
     }
   };
 
@@ -544,6 +573,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return [...list].sort((a, b) => getMillis(b.createdAt) - getMillis(a.createdAt));
   }, [orders, orderFilter]);
 
+  const sortedInventoryProducts = useMemo(() => {
+    const getEpoch = (p: Product): number => {
+      const val = p.createdAt;
+      if (val && typeof val === 'object') {
+        const ts = val as { seconds?: number; toMillis?: () => number };
+        if (typeof ts.toMillis === 'function') return ts.toMillis();
+        if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+      }
+      const match = p.id.match(/^prod_(\d+)$/);
+      return match ? Number(match[1]) || 0 : 0;
+    };
+    return [...products].sort((a, b) => {
+      const aDemo = STARTER_PRODUCT_IDS.has(a.id) ? 1 : 0;
+      const bDemo = STARTER_PRODUCT_IDS.has(b.id) ? 1 : 0;
+      if (aDemo !== bDemo) return aDemo - bDemo;
+      return getEpoch(b) - getEpoch(a);
+    });
+  }, [products]);
+
+  const demoProductCount = useMemo(
+    () => products.filter((p) => STARTER_PRODUCT_IDS.has(p.id)).length,
+    [products]
+  );
+
   const maxCatRevenue = Math.max(1, ...analytics.categorySales.map((c) => c.revenue));
 
   return (
@@ -703,14 +756,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     সরাসরি টেবিল থেকেই যেকোনো পণ্যের দাম বা স্টক সংখ্যা তাৎক্ষণিক পরিবর্তন করুন
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={openCreateProduct}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-zinc-950 text-white text-xs font-semibold rounded-lg hover:bg-zinc-800 cursor-pointer whitespace-nowrap"
-                >
-                  <PackagePlus className="w-4 h-4" />
-                  <span>নতুন পণ্য যুক্ত করুন</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  {hasFirestoreProducts && demoProductCount > 0 && (
+                    <button
+                      type="button"
+                      disabled={seeding}
+                      onClick={() => void handleDeleteAllDemoProducts()}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2.5 border border-rose-200 bg-rose-50 text-rose-700 text-xs font-semibold rounded-lg hover:bg-rose-100 cursor-pointer whitespace-nowrap"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>ডেমো পণ্য মুছুন ({demoProductCount}টি)</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={openCreateProduct}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-zinc-950 text-white text-xs font-semibold rounded-lg hover:bg-zinc-800 cursor-pointer whitespace-nowrap"
+                  >
+                    <PackagePlus className="w-4 h-4" />
+                    <span>নতুন পণ্য যুক্ত করুন</span>
+                  </button>
+                </div>
               </div>
 
               {productSuccessMsg && (
@@ -973,7 +1039,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-200">
-                    {products.map((p) => {
+                    {sortedInventoryProducts.map((p) => {
                       const draft = inlineEdits[p.id];
                       return (
                         <tr key={p.id} className="hover:bg-zinc-50/70">

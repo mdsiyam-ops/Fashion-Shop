@@ -201,6 +201,8 @@ export const STARTER_PRODUCTS: Product[] = [
   },
 ];
 
+export const STARTER_PRODUCT_IDS = new Set(STARTER_PRODUCTS.map((p) => p.id));
+
 export const STARTER_REVIEWS: Review[] = [
   {
     id: 'rev_seed_1',
@@ -257,6 +259,21 @@ export const STARTER_REVIEWS: Review[] = [
     verifiedPurchase: true,
   },
 ];
+
+export async function ensureCategoryInFirestore(cat: Category): Promise<void> {
+  const catRef = doc(db, 'categories', cat.id);
+  const snap = await getDoc(catRef);
+  if (!snap.exists()) {
+    await setDoc(catRef, {
+      id: cat.id,
+      name: cat.name,
+      slug: cat.slug,
+      description: cat.description || '',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+}
 
 export async function seedInitialStoreData(adminUid: string): Promise<void> {
   // Step 1: Categories (create only missing docs so existing immutable createdAt is never touched)
