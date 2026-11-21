@@ -74,7 +74,7 @@ function getFriendlyAuthError(error: unknown): string {
     return 'অতিরিক্ত চেষ্টার কারণে সাময়িকভাবে ব্লক করা হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।';
   }
   if (code === 'auth/operation-not-allowed') {
-    return 'Firebase Console → Authentication → Sign-in method থেকে সংশ্লিষ্ট সাইন-ইন মাধ্যমটি (Email/Password বা Phone) এখনো Enable করা হয়নি।';
+    return 'Firebase Console → Authentication → Sign-in method থেকে এই সাইন-ইন মাধ্যমটি এখনো Enable করা হয়নি। দ্রুত প্রবেশ করতে নিচের "Google (জিমেইল) দিয়ে সরাসরি সাইন ইন করুন" বাটন ব্যবহার করুন।';
   }
   if (code === 'auth/account-exists-with-different-credential') {
     return 'এই জিমেইল দিয়ে আগেই অন্য মাধ্যমে অ্যাকাউন্ট খোলা হয়েছে। একটি জিমেইল দিয়ে একটি অ্যাকাউন্টই অনুমোদিত।';
@@ -82,10 +82,22 @@ function getFriendlyAuthError(error: unknown): string {
   if (code === 'auth/unauthorized-domain' || message.includes('unauthorized-domain')) {
     return `এই ডোমেইনটি (${window.location.hostname}) Firebase Authentication-এ অনুমোদিত নয়। Firebase Console → Authentication → Settings → Authorized domains-এ "${window.location.hostname}" যোগ করুন।`;
   }
-  if (code === 'auth/popup-closed-by-user') {
-    return 'গুগল লগইন উইন্ডোটি বন্ধ করা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।';
+  if (code === 'auth/popup-blocked' || code === 'auth/cancelled-popup-request') {
+    return 'আপনার ব্রাউজার বা অ্যাপ গুগল লগইন পপ-আপ উইন্ডোটি ব্লক করেছে। পপ-আপ অনুমতি দিন, অথবা Chrome/Safari ব্রাউজারে ওয়েবসাইটটি খুলে চেষ্টা করুন।';
   }
-  return 'প্রমাণীকরণ সম্পন্ন করা যায়নি। অনুগ্রহ করে তথ্য যাচাই করে আবার চেষ্টা করুন।';
+  if (code === 'auth/popup-closed-by-user') {
+    return 'গুগল লগইন উইন্ডোটি সম্পন্ন হওয়ার আগেই বন্ধ করা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।';
+  }
+  if (code === 'auth/web-storage-unsupported') {
+    return 'এই ব্রাউজারে কুকি বা স্টোরেজ ব্লক করা আছে, তাই লগইন সেশন রাখা যাচ্ছে না। ব্রাউজারে Cookies/Site Data চালু করে চেষ্টা করুন।';
+  }
+  if (code === 'auth/network-request-failed') {
+    return 'ইন্টারনেট সংযোগে সমস্যা হচ্ছে। নেটওয়ার্ক পরীক্ষা করে আবার চেষ্টা করুন।';
+  }
+  if (code === 'auth/user-disabled') {
+    return 'এই অ্যাকাউন্টটি সাময়িকভাবে নিষ্ক্রিয় করা হয়েছে।';
+  }
+  return `প্রমাণীকরণ সম্পন্ন করা যায়নি${code ? ` (${code})` : ''}। অনুগ্রহ করে তথ্য যাচাই করে আবার চেষ্টা করুন।`;
 }
 
 export const AuthPanel: React.FC<AuthPanelProps> = ({
@@ -112,6 +124,9 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const isInAppBrowser =
+    typeof navigator !== 'undefined' &&
+    /FBAN|FBAV|FB_IAB|Messenger|Instagram|Line\/|MicroMessenger/i.test(navigator.userAgent);
 
   const clearRecaptcha = () => {
     if (recaptchaVerifierRef.current) {
@@ -376,6 +391,12 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
           >
             ফোন নম্বর
           </button>
+        </div>
+      )}
+
+      {isInAppBrowser && (
+        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 leading-relaxed">
+          আপনি Facebook বা ইন-অ্যাপ ব্রাউজার থেকে ভিজিট করছেন—যেখানে Google পপ-আপ লগইন অনেক সময় কাজ করে না। সহজে লগইন করতে উপরের মেনু (⋮) থেকে <strong>Open in Browser / Chrome</strong> ব্যবহার করুন অথবা জিমেইল ও পাসওয়ার্ড দিয়ে লগইন করুন।
         </div>
       )}
 

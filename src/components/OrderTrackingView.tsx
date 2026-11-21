@@ -1,8 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { User } from 'firebase/auth';
-import { doc, onSnapshot, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { doc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { CheckCircle2, Clock, Package, Search, Truck, XCircle } from 'lucide-react';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import {
+  getDatabase,
+  handleFirestoreError,
+  listenToDocument,
+  OperationType,
+} from '../firebase';
 import {
   DELIVERY_SPEED_LABELS,
   formatBDT,
@@ -58,11 +63,13 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
 
     setLoading(true);
     setNotFound(false);
-    const unsub = onSnapshot(
-      doc(db, 'orderTracking', clean),
-      (snap) => {
-        if (snap.exists()) {
-          setTrackingDoc(snap.data() as OrderTracking);
+    const unsub = listenToDocument<OrderTracking>(
+      'transactions',
+      'orderTracking',
+      clean,
+      (data) => {
+        if (data) {
+          setTrackingDoc(data);
           setNotFound(false);
         } else {
           setTrackingDoc(null);
@@ -91,12 +98,13 @@ export const OrderTrackingView: React.FC<OrderTrackingViewProps> = ({
     if (!currentUser || order.status !== 'pending') return;
     setCancelling(true);
     try {
-      const batch = writeBatch(db);
-      batch.update(doc(db, 'orders', order.id), {
+      const txDb = getDatabase('transactions');
+      const batch = writeBatch(txDb);
+      batch.update(doc(txDb, 'orders', order.id), {
         status: 'cancelled',
         updatedAt: serverTimestamp(),
       });
-      batch.update(doc(db, 'orderTracking', order.trackingCode), {
+      batch.update(doc(txDb, 'orderTracking', order.trackingCode), {
         status: 'cancelled',
         updatedAt: serverTimestamp(),
       });

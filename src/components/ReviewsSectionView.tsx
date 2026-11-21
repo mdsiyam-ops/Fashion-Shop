@@ -1,8 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import { User } from 'firebase/auth';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { serverTimestamp } from 'firebase/firestore';
 import { Check, Star } from 'lucide-react';
-import { clampStr, db, handleFirestoreError, isVerifiedCustomer, OperationType } from '../firebase';
+import {
+  addDocument,
+  clampStr,
+  handleFirestoreError,
+  isVerifiedCustomer,
+  OperationType,
+} from '../firebase';
 import { formatTimestamp } from '../lib/format';
 import { Product, Review } from '../types';
 
@@ -64,17 +70,22 @@ export const ReviewsSectionView: React.FC<ReviewsSectionViewProps> = ({
     setSuccessMsg('');
     const reviewId = `rev_${Date.now()}_${currentUser.uid.slice(0, 6)}`;
     try {
-      await setDoc(doc(db, 'reviews', reviewId), {
-        id: reviewId,
-        productId: targetProductId,
-        userId: currentUser.uid,
-        authorName: clampStr(authorName || currentUser.displayName || 'সম্মানিত গ্রাহক', 80),
-        rating,
-        comment: clampStr(comment, 1000),
-        verifiedPurchase: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      await addDocument(
+        'engagement',
+        'reviews',
+        {
+          id: reviewId,
+          productId: targetProductId,
+          userId: currentUser.uid,
+          authorName: clampStr(authorName || currentUser.displayName || 'সম্মানিত গ্রাহক', 80),
+          rating,
+          comment: clampStr(comment, 1000),
+          verifiedPurchase: true,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { documentId: reviewId }
+      );
       setComment('');
       setRating(5);
       setSuccessMsg('আপনার ফিডব্যাক ও রেটিং সফলভাবে যুক্ত হয়েছে।');

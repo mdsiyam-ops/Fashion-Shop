@@ -1,8 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { User } from 'firebase/auth';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { serverTimestamp } from 'firebase/firestore';
 import { Check, Minus, Plus, ShieldCheck, Star, Truck, X } from 'lucide-react';
-import { clampStr, db, handleFirestoreError, isVerifiedCustomer, OperationType } from '../firebase';
+import {
+  addDocument,
+  clampStr,
+  handleFirestoreError,
+  isVerifiedCustomer,
+  OperationType,
+} from '../firebase';
 import { formatBDT, formatTimestamp } from '../lib/format';
 import { Product, Review } from '../types';
 import { ResilientImage } from './ResilientImage';
@@ -86,17 +92,22 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
     setReviewFeedback('');
     const reviewId = `rev_${Date.now()}_${currentUser.uid.slice(0, 6)}`;
     try {
-      await setDoc(doc(db, 'reviews', reviewId), {
-        id: reviewId,
-        productId: product.id,
-        userId: currentUser.uid,
-        authorName: cleanAuthor,
-        rating: ratingInput,
-        comment: cleanComment,
-        verifiedPurchase: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      await addDocument(
+        'engagement',
+        'reviews',
+        {
+          id: reviewId,
+          productId: product.id,
+          userId: currentUser.uid,
+          authorName: cleanAuthor,
+          rating: ratingInput,
+          comment: cleanComment,
+          verifiedPurchase: true,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { documentId: reviewId }
+      );
       setCommentInput('');
       setRatingInput(5);
       setReviewFeedback('আপনার মূল্যবান রিভিউ সফলভাবে প্রকাশিত হয়েছে।');

@@ -1,21 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { onIdTokenChanged, sendEmailVerification, signOut, User } from 'firebase/auth';
-import {
-  collection,
-  doc,
-  getDoc,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-  where,
-} from 'firebase/firestore';
-import { Bell, MailCheck, X } from 'lucide-react';
+import { serverTimestamp } from 'firebase/firestore';
+import { AlertTriangle, Bell, ExternalLink, MailCheck, X } from 'lucide-react';
 import { AdminDashboard } from './components/AdminDashboard';
 import { AuthPanel } from './components/AuthPanel';
 import { CartAndCheckoutModal } from './components/CartAndCheckoutModal';
+import { MultiFirebaseLoginModal } from './components/MultiFirebaseLoginModal';
 import { ActiveTab, Navbar } from './components/Navbar';
 import { OrderTrackingView } from './components/OrderTrackingView';
 import { ProductDetailModal } from './components/ProductDetailModal';
@@ -23,15 +13,26 @@ import { ProfileAndNotificationsView } from './components/ProfileAndNotification
 import { ReviewsSectionView } from './components/ReviewsSectionView';
 import { Storefront } from './components/Storefront';
 import {
+  addDocument,
   ADMIN_EMAIL,
   auth,
   clampStr,
-  db,
+  getDocument,
   handleFirestoreError,
   isQuotaExceededError,
   isVerifiedCustomer,
+  listenToCollection,
+  listenToDocument,
   OperationType,
+  updateDocument,
 } from './firebase';
+import {
+  getProjectAuthUser,
+  getProjectForRole,
+  getUnsignedActiveRoleProjects,
+  setRoleAssignment,
+  subscribeRoutingUpdates,
+} from './lib/multiFirebaseManager';
 import {
   DEFAULT_STORE_SETTINGS,
   purgeDemoDataFromFirestore,
@@ -91,7 +92,10 @@ export default function App() {
     return [];
   });
   const [productsLoaded, setProductsLoaded] = useState(false);
-  const [firestoreIssue, setFirestoreIssue] = useState<'quota' | 'network' | null>(null);
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
+  const [firestoreIssue, setFirestoreIssue] = useState<
+    'quota' | 'network' | 'secondary_permission' | null
+  >(null);
   const [listenerEpoch, setListenerEpoch] = useState(0);
   const [fsReviews, setFsReviews] = useState<Review[]>([]);
   const [settings, setSettings] = useState<StoreSettings>(() => {
@@ -141,7 +145,11 @@ export default function App() {
 
   const seededRef = useRef(false);
   const purgedDemoRef = useRef(false);
+  const syncedUserIdsRef = useRef<Set<string>>(new Set());
+  const quotaBlockedRef = useRef(false);
   const seenNotifIdsRef = useRef<Set<string>>(new Set());
+  const promptedMultiLoginRef = useRef(false);
+  const [multiLoginModalOpen, setMultiLoginModalOpen] = useState(false);
 
   const isAdmin = Boolean(
     currentUser &&
@@ -165,6 +173,27 @@ export default function App() {
     }
   }, [cart]);
 
+  // Re-bind subscriptions cleanly if Admin updates Firebase project role assignments
+  useEffect(() => {
+    return subscribeRoutingUpdates(() => {
+      setListenerEpoch((e) => e + 1);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (!currentUser) {
+      promptedMultiLoginRef.current = false;
+      setMultiLoginModalOpen(false);
+      return;
+    }
+    const unsignedActive = getUnsignedActiveRoleProjects();
+    if (unsignedActive.length > 0 && !promptedMultiLoginRef.current) {
+      promptedMultiLoginRef.current = true;
+      setMultiLoginModalOpen(true);
+    }
+  }, [authReady, currentUser, listenerEpoch]);
+
   // Auth Listener (responds to sign-in, sign-out, and token refresh after email verification)
   useEffect(() => {
     const unsub = onIdTokenChanged(auth, async (user) => {
@@ -175,29 +204,41 @@ export default function App() {
       }
       if (user && isVerifiedCustomer(user)) {
         setVerifyFeedback('');
+        if (syncedUserIdsRef.current.has(user.uid) || quotaBlockedRef.current) {
+          return;
+        }
         try {
-          const userRef = doc(db, 'users', user.uid);
-          const snap = await getDoc(userRef);
+          const existing = await getDocument<{ uid: string }>('users', 'users', user.uid);
           const fallbackName = clampStr(
             user.displayName || user.phoneNumber || 'সম্মানিত গ্রাহক',
             100
           );
           const isAdminEmail = user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-          if (!snap.exists()) {
-            await setDoc(userRef, {
-              uid: user.uid,
-              displayName: fallbackName,
-              role: isAdminEmail ? 'admin' : 'customer',
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-            });
+          if (!existing) {
+            await addDocument(
+              'users',
+              'users',
+              {
+                uid: user.uid,
+                displayName: fallbackName,
+                role: isAdminEmail ? 'admin' : 'customer',
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+              },
+              { documentId: user.uid }
+            );
           } else if (user.displayName) {
-            await updateDoc(userRef, {
+            await updateDocument('users', 'users', user.uid, {
               displayName: clampStr(user.displayName, 100),
               updatedAt: serverTimestamp(),
             });
           }
-        } catch {
+          syncedUserIdsRef.current.add(user.uid);
+        } catch (err) {
+          if (isQuotaExceededError(err)) {
+            quotaBlockedRef.current = true;
+            setFirestoreIssue('quota');
+          }
           // Non-fatal user sync guard
         }
       }
@@ -205,7 +246,7 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Public Storefront Subscriptions (Categories, Products, Reviews, Settings)
+  // Public Storefront Subscriptions (Routed independently by Database Role)
   useEffect(() => {
     let resolvedProducts = false;
 
@@ -222,37 +263,55 @@ export default function App() {
         setProductsLoaded(true);
       }
       if (isQuotaExceededError(err)) {
+        quotaBlockedRef.current = true;
         setFirestoreIssue('quota');
         return;
       }
       const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
       if (msg.includes('permission') || msg.includes('insufficient')) {
-        handleFirestoreError(err, op, path);
+        if (path === 'products') {
+          const currentCatalogProj = getProjectForRole('catalog');
+          if (currentCatalogProj.id !== 'project_1') {
+            console.warn(
+              `Secondary catalog project (${currentCatalogProj.projectId}) permission denied on products:`,
+              err
+            );
+            setFirestoreIssue('secondary_permission');
+            return;
+          }
+          handleFirestoreError(err, op, path);
+        } else {
+          console.warn(`Non-fatal permission issue on ${path}:`, err);
+        }
         return;
       }
-      setFirestoreIssue((prev) => prev ?? 'network');
+      if (path === 'products') {
+        setFirestoreIssue((prev) => prev ?? 'network');
+      }
     };
 
-    const unsubCats = onSnapshot(
-      collection(db, 'categories'),
-      (snap) => {
-        const list = snap.docs.map((d) => d.data() as Category);
+    const unsubCats = listenToCollection<Category>(
+      'catalog',
+      'categories',
+      (list) => {
         setFsCategories(list);
+        setCategoriesLoaded(true);
         try {
           localStorage.setItem('fashion_shop_categories_cache_v1', JSON.stringify(list));
         } catch {
           // ignore storage quota errors
         }
       },
-      (err) => handlePublicListenerError(err, OperationType.LIST, 'categories')
+      { onError: (err) => handlePublicListenerError(err, OperationType.LIST, 'categories') }
     );
 
-    const unsubProds = onSnapshot(
-      collection(db, 'products'),
-      (snap) => {
+    const unsubProds = listenToCollection<Product>(
+      'catalog',
+      'products',
+      (list) => {
         resolvedProducts = true;
+        quotaBlockedRef.current = false;
         window.clearTimeout(loadingTimeout);
-        const list = snap.docs.map((d) => d.data() as Product);
         setFsProducts(list);
         setProductsLoaded(true);
         setFirestoreIssue(null);
@@ -263,26 +322,33 @@ export default function App() {
           // ignore storage quota errors
         }
       },
-      (err) => {
-        window.clearTimeout(loadingTimeout);
-        handlePublicListenerError(err, OperationType.LIST, 'products');
+      {
+        onError: (err) => {
+          window.clearTimeout(loadingTimeout);
+          handlePublicListenerError(err, OperationType.LIST, 'products');
+        },
       }
     );
 
-    const unsubRevs = onSnapshot(
-      query(collection(db, 'reviews'), orderBy('createdAt', 'desc')),
-      (snap) => {
-        const list = snap.docs.map((d) => d.data() as Review);
+    const unsubRevs = listenToCollection<Review>(
+      'engagement',
+      'reviews',
+      (list) => {
         setFsReviews(list);
       },
-      (err) => handlePublicListenerError(err, OperationType.LIST, 'reviews')
+      {
+        orderByField: 'createdAt',
+        orderDirection: 'desc',
+        onError: (err) => handlePublicListenerError(err, OperationType.LIST, 'reviews'),
+      }
     );
 
-    const unsubSettings = onSnapshot(
-      doc(db, 'settings', 'store'),
-      (snap) => {
-        if (snap.exists()) {
-          const data = snap.data() as Partial<StoreSettings>;
+    const unsubSettings = listenToDocument<Partial<StoreSettings>>(
+      'admin',
+      'settings',
+      'store',
+      (data) => {
+        if (data) {
           const merged: StoreSettings = {
             ...DEFAULT_STORE_SETTINGS,
             ...data,
@@ -333,11 +399,14 @@ export default function App() {
     }
   }, [authReady, productsLoaded, isAdmin, currentUser, fsProducts, fsReviews]);
 
-  // Ensure initial categories & store settings exist (without seeding any demo products)
+  // Ensure initial categories & store settings exist (ONLY once categories have actually loaded and quota is healthy)
   useEffect(() => {
     if (
       authReady &&
       productsLoaded &&
+      categoriesLoaded &&
+      firestoreIssue === null &&
+      !quotaBlockedRef.current &&
       isAdmin &&
       currentUser &&
       fsCategories.length === 0 &&
@@ -348,9 +417,9 @@ export default function App() {
         seededRef.current = false;
       });
     }
-  }, [authReady, productsLoaded, isAdmin, currentUser, fsCategories.length]);
+  }, [authReady, productsLoaded, categoriesLoaded, firestoreIssue, isAdmin, currentUser, fsCategories.length]);
 
-  // Authenticated Private Profile, Orders & Real-Time Notifications Subscriptions
+  // Authenticated Private Profile, Orders & Real-Time Notifications Subscriptions (Isolated by Role)
   useEffect(() => {
     if (!authReady || !currentUser) {
       setPrivateProfile(null);
@@ -360,30 +429,36 @@ export default function App() {
       return;
     }
 
-    const unsubProfile = onSnapshot(
-      doc(db, 'users', currentUser.uid, 'private', 'profile'),
-      (snap) => {
-        setPrivateProfile(snap.exists() ? (snap.data() as UserPrivateProfile) : null);
+    const unsubProfile = listenToDocument<UserPrivateProfile>(
+      'users',
+      `users/${currentUser.uid}/private`,
+      'profile',
+      (data) => {
+        setPrivateProfile(data);
       },
-      (err) => handleFirestoreError(err, OperationType.GET, `users/${currentUser.uid}/private/profile`)
+      (err) => console.warn('Non-fatal profile listener error:', err)
     );
 
-    const unsubUserOrders = onSnapshot(
-      query(collection(db, 'orders'), where('userId', '==', currentUser.uid)),
-      (snap) => {
-        const list = snap.docs.map((d) => d.data() as Order);
+    const txProj = getProjectForRole('transactions');
+    const txAuthUser = txProj.id !== 'project_1' ? getProjectAuthUser(txProj.id) : currentUser;
+    const effectiveTxUid = txAuthUser?.uid || currentUser.uid;
+
+    const unsubUserOrders = listenToCollection<Order>(
+      'transactions',
+      'orders',
+      (list) => {
         setUserOrders(list);
       },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'orders')
+      {
+        conditions: [{ field: 'userId', op: '==', value: effectiveTxUid }],
+        onError: (err) => console.warn('Non-fatal user orders listener error:', err),
+      }
     );
 
-    const unsubNotifs = onSnapshot(
-      query(
-        collection(db, 'notifications'),
-        where('recipientId', '==', isAdmin ? 'admin' : currentUser.uid)
-      ),
-      (snap) => {
-        const list = snap.docs.map((d) => d.data() as AppNotification);
+    const unsubNotifs = listenToCollection<AppNotification>(
+      'users',
+      'notifications',
+      (list) => {
         setNotifications(list);
         const newestUnread = list.find((n) => !n.read && !seenNotifIdsRef.current.has(n.id));
         if (newestUnread) {
@@ -391,17 +466,23 @@ export default function App() {
           setLiveToast(newestUnread);
         }
       },
-      (err) => handleFirestoreError(err, OperationType.LIST, 'notifications')
+      {
+        conditions: [{ field: 'recipientId', op: '==', value: isAdmin ? 'admin' : currentUser.uid }],
+        onError: (err) => console.warn('Non-fatal notifications listener error:', err),
+      }
     );
 
     let unsubAdminOrders = () => {};
     if (isAdmin) {
-      unsubAdminOrders = onSnapshot(
-        collection(db, 'orders'),
-        (snap) => {
-          setAdminOrders(snap.docs.map((d) => d.data() as Order));
+      unsubAdminOrders = listenToCollection<Order>(
+        'transactions',
+        'orders',
+        (list) => {
+          setAdminOrders(list);
         },
-        (err) => handleFirestoreError(err, OperationType.LIST, 'orders')
+        {
+          onError: (err) => console.warn('Non-fatal admin orders listener error:', err),
+        }
       );
     }
 
@@ -411,7 +492,7 @@ export default function App() {
       unsubNotifs();
       unsubAdminOrders();
     };
-  }, [authReady, currentUser, isAdmin]);
+  }, [authReady, currentUser, isAdmin, listenerEpoch]);
 
   const activeCategories = fsCategories.length > 0 ? fsCategories : STARTER_CATEGORIES;
   const activeProducts = useMemo(
@@ -495,6 +576,9 @@ export default function App() {
   const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
   const unreadNotifCount = notifications.filter((n) => !n.read).length;
 
+  const catalogProj = getProjectForRole('catalog');
+  const quotaUpgradeUrl = `https://console.firebase.google.com/project/${catalogProj.projectId}/firestore/databases/${catalogProj.firestoreDatabaseId || '(default)'}/data?openUpgradeDialog=true`;
+
   return (
     <div className="min-h-screen flex flex-col bg-[#F8F9FA] text-zinc-950">
       <Navbar
@@ -509,6 +593,79 @@ export default function App() {
           setCartOpen(true);
         }}
       />
+
+      {/* Firestore Daily Free Quota Exceeded Banner */}
+      {firestoreIssue === 'quota' && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 text-xs text-amber-950">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start sm:items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5 sm:mt-0" />
+              <span>
+                Firebase Firestore-এর আজকের ফ্রি ডেইলি রিড কোটা পূর্ণ হয়ে গেছে (আগামীকাল রিসেট হবে)। বিস্তারিত দেখতে বা আপগ্রেড করতে Firebase Console খুলুন।
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <a
+                href={quotaUpgradeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-3 py-1.5 bg-amber-600 text-white rounded-md font-semibold hover:bg-amber-700"
+              >
+                <span>Firebase Console</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  quotaBlockedRef.current = false;
+                  setFirestoreIssue(null);
+                  setCategoriesLoaded(false);
+                  setProductsLoaded(false);
+                  setListenerEpoch((e) => e + 1);
+                }}
+                className="px-3 py-1.5 bg-white border border-amber-300 rounded-md font-semibold text-amber-900 hover:bg-amber-100 cursor-pointer"
+              >
+                পুনরায় চেষ্টা
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Secondary Project Catalog Permission Banner */}
+      {firestoreIssue === 'secondary_permission' && (
+        <div className="bg-rose-50 border-b border-rose-200 px-4 py-3 text-xs text-rose-950">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start sm:items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-700 shrink-0 mt-0.5 sm:mt-0" />
+              <span>
+                ক্যাটালগ রোলটি সেকেন্ডারি প্রজেক্ট (<strong>{catalogProj.projectId}</strong>)-এ সেট করা আছে, কিন্তু সেখানে <code className="bg-rose-100 px-1 rounded">products</code> পড়ার Firestore Rules পাবলিশ করা নেই।
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setRoleAssignment('catalog', 'project_1');
+                  setFirestoreIssue(null);
+                }}
+                className="px-3 py-1.5 bg-zinc-950 text-white rounded-md font-semibold hover:bg-zinc-800 cursor-pointer"
+              >
+                ক্যাটালগ Firebase 1-এ ফিরিয়ে নিন
+              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('admin')}
+                  className="px-3 py-1.5 bg-white border border-rose-300 rounded-md font-semibold text-rose-900 hover:bg-rose-100 cursor-pointer"
+                >
+                  অ্যাডমিন প্যানেল
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Email Verification Prompt for newly created Email/Password accounts */}
       {currentUser && currentUser.email && !currentUser.emailVerified && (
@@ -577,9 +734,14 @@ export default function App() {
           <Storefront
             products={activeProducts}
             productsLoaded={productsLoaded}
-            firestoreIssue={firestoreIssue}
+            firestoreIssue={
+              firestoreIssue === 'secondary_permission' ? 'network' : firestoreIssue
+            }
+            quotaUpgradeUrl={quotaUpgradeUrl}
             onRetryConnection={() => {
+              quotaBlockedRef.current = false;
               setFirestoreIssue(null);
+              setCategoriesLoaded(false);
               setProductsLoaded(false);
               setListenerEpoch((e) => e + 1);
             }}
@@ -732,6 +894,12 @@ export default function App() {
           />
         </div>
       )}
+
+      <MultiFirebaseLoginModal
+        isOpen={multiLoginModalOpen}
+        onlyActiveRoles
+        onClose={() => setMultiLoginModalOpen(false)}
+      />
     </div>
   );
 }

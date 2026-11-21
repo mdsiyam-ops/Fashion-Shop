@@ -2,7 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { User } from 'firebase/auth';
 import { doc, increment, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { CheckCircle2, CreditCard, Lock, Minus, Plus, ShieldCheck, Smartphone, Trash2, Truck, X } from 'lucide-react';
-import { clampStr, db, handleFirestoreError, isVerifiedCustomer, OperationType } from '../firebase';
+import {
+  clampStr,
+  getDatabase,
+  handleFirestoreError,
+  isSameDatabaseForRoles,
+  isVerifiedCustomer,
+  OperationType,
+} from '../firebase';
+import { getProjectAuthUser, getProjectForRole, signInToProject } from '../lib/multiFirebaseManager';
 import { DELIVERY_SPEED_LABELS, formatBDT, PAYMENT_METHOD_LABELS } from '../lib/format';
 import {
   CartItem,
@@ -173,13 +181,15 @@ export const CartAndCheckoutModal: React.FC<CartAndCheckoutModalProps> = ({
         ? '২৪ থেকে ৪৮ ঘণ্টার মধ্যে (ঢাকার ভেতরে)'
         : '৩ থেকে ৫ দিনের মধ্যে (ঢাকার বাইরে)';
 
-    const batch = writeBatch(db);
+    const txProj = getProjectForRole('transactions');
+    const isSecondaryTxProj = txProj.id !== 'project_1';
+    const txAuthUser = isSecondaryTxProj ? getProjectAuthUser(txProj.id) : currentUser;
+    const effectiveTxUserId = txAuthUser?.uid || currentUser.uid;
 
-    // 1. Private Order Record (PII isolated to owner & admin)
-    batch.set(doc(db, 'orders', orderId), {
+    const orderPayload = {
       id: orderId,
       trackingCode,
-      userId: currentUser.uid,
+      userId: effectiveTxUserId,
       customerName: clampStr(customerName, 100),
       customerPhone: clampStr(customerPhone, 30),
       shippingAddress: clampStr(shippingAddress, 400),
@@ -207,13 +217,12 @@ export const CartAndCheckoutModal: React.FC<CartAndCheckoutModalProps> = ({
       source: trafficSource,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    };
 
-    // 2. Sanitized Non-PII Public Tracking Projection (Atomic Pillar 7)
-    batch.set(doc(db, 'orderTracking', trackingCode), {
+    const trackingPayload = {
       trackingCode,
       orderId,
-      userId: currentUser.uid,
+      userId: effectiveTxUserId,
       status: 'pending',
       deliverySpeed,
       city: clampStr(city, 80),
@@ -225,22 +234,10 @@ export const CartAndCheckoutModal: React.FC<CartAndCheckoutModalProps> = ({
       estimatedWindow,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    };
 
-    // 3. Atomic Stock Decrement on live Firestore products
-    for (const item of cart) {
-      if (firestoreProductIds.has(item.product.id) && item.product.stock >= item.quantity) {
-        batch.update(doc(db, 'products', item.product.id), {
-          stock: item.product.stock - item.quantity,
-          soldCount: increment(item.quantity),
-          updatedAt: serverTimestamp(),
-        });
-      }
-    }
-
-    // 4. Real-Time Notifications for Customer & Admin
     const custNotifId = `notif_cust_${Date.now()}`;
-    batch.set(doc(db, 'notifications', custNotifId), {
+    const custNotifPayload = {
       id: custNotifId,
       recipientId: currentUser.uid,
       title: `অর্ডার নিশ্চিত হয়েছে (${trackingCode})`,
@@ -249,10 +246,10 @@ export const CartAndCheckoutModal: React.FC<CartAndCheckoutModalProps> = ({
       relatedOrderId: orderId,
       read: false,
       createdAt: serverTimestamp(),
-    });
+    };
 
     const adminNotifId = `notif_adm_${Date.now()}`;
-    batch.set(doc(db, 'notifications', adminNotifId), {
+    const adminNotifPayload = {
       id: adminNotifId,
       recipientId: 'admin',
       title: `নতুন অর্ডার এসেছে (${trackingCode})`,
@@ -261,26 +258,97 @@ export const CartAndCheckoutModal: React.FC<CartAndCheckoutModalProps> = ({
       relatedOrderId: orderId,
       read: false,
       createdAt: serverTimestamp(),
-    });
+    };
 
-    // 5. Save/Update User's Private Profile for future 1-click checkout
-    batch.set(
-      doc(db, 'users', currentUser.uid, 'private', 'profile'),
-      {
-        userId: currentUser.uid,
-        email: clampStr(currentUser.email || '', 160),
-        phone: clampStr(customerPhone, 30),
-        address: clampStr(shippingAddress, 400),
-        city: clampStr(city, 80),
-        postalCode: clampStr(postalCode || '1000', 20),
-        preferredDelivery: deliverySpeed,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
+    const profilePayload = {
+      userId: currentUser.uid,
+      email: clampStr(currentUser.email || '', 160),
+      phone: clampStr(customerPhone, 30),
+      address: clampStr(shippingAddress, 400),
+      city: clampStr(city, 80),
+      postalCode: clampStr(postalCode || '1000', 20),
+      preferredDelivery: deliverySpeed,
+      updatedAt: serverTimestamp(),
+    };
 
     try {
-      await batch.commit();
+      const txDb = getDatabase('transactions');
+      const catalogDb = getDatabase('catalog');
+      const usersDb = getDatabase('users');
+
+      const singleProjectAll =
+        isSameDatabaseForRoles('transactions', 'catalog') &&
+        isSameDatabaseForRoles('transactions', 'users');
+
+      if (singleProjectAll) {
+        // Atomic single-database writeBatch
+        const batch = writeBatch(txDb);
+        batch.set(doc(txDb, 'orders', orderId), orderPayload);
+        batch.set(doc(txDb, 'orderTracking', trackingCode), trackingPayload);
+
+        for (const item of cart) {
+          if (firestoreProductIds.has(item.product.id) && item.product.stock >= item.quantity) {
+            batch.update(doc(txDb, 'products', item.product.id), {
+              stock: item.product.stock - item.quantity,
+              soldCount: increment(item.quantity),
+              updatedAt: serverTimestamp(),
+            });
+          }
+        }
+
+        batch.set(doc(txDb, 'notifications', custNotifId), custNotifPayload);
+        batch.set(doc(txDb, 'notifications', adminNotifId), adminNotifPayload);
+        batch.set(doc(txDb, 'users', currentUser.uid, 'private', 'profile'), profilePayload, {
+          merge: true,
+        });
+
+        await batch.commit();
+      } else {
+        // Multi-project flow: commit 'transactions' atomically first using deterministic idempotency ID (orderId).
+        // Never report success until the primary transaction database confirms the write.
+        const txBatch = writeBatch(txDb);
+        txBatch.set(doc(txDb, 'orders', orderId), {
+          ...orderPayload,
+          idempotencyKey: orderId,
+        });
+        txBatch.set(doc(txDb, 'orderTracking', trackingCode), trackingPayload);
+        await txBatch.commit();
+
+        // Secondary role updates (isolated per project; failures do not roll back confirmed transaction)
+        const stockItems = cart.filter(
+          (item) => firestoreProductIds.has(item.product.id) && item.product.stock >= item.quantity
+        );
+        if (stockItems.length > 0) {
+          try {
+            const catBatch = writeBatch(catalogDb);
+            for (const item of stockItems) {
+              catBatch.update(doc(catalogDb, 'products', item.product.id), {
+                stock: item.product.stock - item.quantity,
+                soldCount: increment(item.quantity),
+                updatedAt: serverTimestamp(),
+              });
+            }
+            await catBatch.commit();
+          } catch (catErr) {
+            console.warn('Cross-project catalog stock sync deferred:', catErr);
+          }
+        }
+
+        try {
+          const userBatch = writeBatch(usersDb);
+          userBatch.set(doc(usersDb, 'notifications', custNotifId), custNotifPayload);
+          userBatch.set(doc(usersDb, 'notifications', adminNotifId), adminNotifPayload);
+          userBatch.set(
+            doc(usersDb, 'users', currentUser.uid, 'private', 'profile'),
+            profilePayload,
+            { merge: true }
+          );
+          await userBatch.commit();
+        } catch (userErr) {
+          console.warn('Cross-project notification/profile sync deferred:', userErr);
+        }
+      }
+
       setCompletedTrackingCode(trackingCode);
       onClearCart();
       setCardCvv('');
@@ -288,6 +356,13 @@ export const CartAndCheckoutModal: React.FC<CartAndCheckoutModalProps> = ({
       setGatewayOtp('');
       setStep('success');
     } catch (error) {
+      const errMsg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+      if (isSecondaryTxProj && (errMsg.includes('permission') || errMsg.includes('insufficient'))) {
+        setGatewayError(
+          `অর্ডার ডাটাবেস (${txProj.label}) থেকে অনুমতি পাওয়া যায়নি। ওই প্রজেক্টে সাইন-ইন করুন অথবা অ্যাডমিন প্যানেল থেকে রোলটি Firebase 1-এ সেট করুন।`
+        );
+        return;
+      }
       handleFirestoreError(error, OperationType.WRITE, `orders/${orderId}`);
     } finally {
       setSubmitting(false);
@@ -601,7 +676,19 @@ export const CartAndCheckoutModal: React.FC<CartAndCheckoutModalProps> = ({
               </div>
 
               {gatewayError && (
-                <p className="text-xs text-rose-600 font-medium">{gatewayError}</p>
+                <div className="space-y-2">
+                  <p className="text-xs text-rose-600 font-medium">{gatewayError}</p>
+                  {getProjectForRole('transactions').id !== 'project_1' &&
+                    !getProjectAuthUser(getProjectForRole('transactions').id) && (
+                      <button
+                        type="button"
+                        onClick={() => void signInToProject(getProjectForRole('transactions').id)}
+                        className="px-3 py-1.5 bg-zinc-950 text-white text-xs font-semibold rounded-md hover:bg-zinc-800 cursor-pointer"
+                      >
+                        সেকেন্ডারি প্রজেক্টে Google সাইন-ইন করুন
+                      </button>
+                    )}
+                </div>
               )}
             </form>
           )}
@@ -710,7 +797,19 @@ export const CartAndCheckoutModal: React.FC<CartAndCheckoutModalProps> = ({
               )}
 
               {gatewayError && (
-                <p className="text-xs text-rose-600 font-medium">{gatewayError}</p>
+                <div className="space-y-2">
+                  <p className="text-xs text-rose-600 font-medium">{gatewayError}</p>
+                  {getProjectForRole('transactions').id !== 'project_1' &&
+                    !getProjectAuthUser(getProjectForRole('transactions').id) && (
+                      <button
+                        type="button"
+                        onClick={() => void signInToProject(getProjectForRole('transactions').id)}
+                        className="px-3 py-1.5 bg-zinc-950 text-white text-xs font-semibold rounded-md hover:bg-zinc-800 cursor-pointer"
+                      >
+                        সেকেন্ডারি প্রজেক্টে Google সাইন-ইন করুন
+                      </button>
+                    )}
+                </div>
               )}
 
               <button

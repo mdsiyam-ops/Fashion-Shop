@@ -31,6 +31,12 @@ export class ErrorBoundary extends Component<Props, State> {
       let friendlyMsg = 'অ্যাপ্লিকেশন লোড করতে একটি অপ্রত্যাশিত সমস্যা হয়েছে।';
       if (this.state.errorMessage.includes('Missing or insufficient permissions')) {
         friendlyMsg = 'নিরাপত্তা নীতির কারণে এই তথ্য অ্যাক্সেস করার অনুমতি নেই। অনুগ্রহ করে সঠিক অ্যাকাউন্ট দিয়ে লগইন করুন।';
+      } else if (
+        this.state.errorMessage.toLowerCase().includes('quota') ||
+        this.state.errorMessage.toLowerCase().includes('resource-exhausted')
+      ) {
+        friendlyMsg =
+          'Firebase Firestore-এর আজকের ফ্রি রিড কোটা পূর্ণ হয়ে গেছে। আগামীকাল কোটা রিসেট হবে অথবা Firebase Console থেকে প্ল্যান আপগ্রেড করতে পারবেন।';
       }
       return (
         <div className="min-h-screen bg-[#F8F9FA] flex items-center justify-center p-6">

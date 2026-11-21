@@ -8,7 +8,12 @@ import {
   updateDoc,
   writeBatch,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import {
+  getDatabase,
+  handleFirestoreError,
+  isQuotaExceededError,
+  OperationType,
+} from '../firebase';
 import { Category, StoreSettings } from '../types';
 
 import productWirelessAudioImg from '../assets/images/product_wireless_audio_1795062468395.jpg';
@@ -109,7 +114,8 @@ export const STARTER_REVIEW_IDS = new Set([
 ]);
 
 export async function ensureCategoryInFirestore(cat: Category): Promise<void> {
-  const catRef = doc(db, 'categories', cat.id);
+  const catalogDb = getDatabase('catalog');
+  const catRef = doc(catalogDb, 'categories', cat.id);
   const snap = await getDoc(catRef);
   if (!snap.exists()) {
     await setDoc(catRef, {
@@ -129,28 +135,37 @@ export async function purgeDemoDataFromFirestore(
 ): Promise<void> {
   const demoProdIds = existingProductIds.filter((id) => STARTER_PRODUCT_IDS.has(id));
   const demoRevIds = existingReviewIds.filter((id) => STARTER_REVIEW_IDS.has(id));
-  if (demoProdIds.length === 0 && demoRevIds.length === 0) return;
 
-  const batch = writeBatch(db);
-  demoProdIds.forEach((id) => {
-    batch.delete(doc(db, 'products', id));
-  });
-  demoRevIds.forEach((id) => {
-    batch.delete(doc(db, 'reviews', id));
-  });
-  await batch.commit();
+  if (demoProdIds.length > 0) {
+    const catalogDb = getDatabase('catalog');
+    const prodBatch = writeBatch(catalogDb);
+    demoProdIds.forEach((id) => {
+      prodBatch.delete(doc(catalogDb, 'products', id));
+    });
+    await prodBatch.commit();
+  }
+
+  if (demoRevIds.length > 0) {
+    const engagementDb = getDatabase('engagement');
+    const revBatch = writeBatch(engagementDb);
+    demoRevIds.forEach((id) => {
+      revBatch.delete(doc(engagementDb, 'reviews', id));
+    });
+    await revBatch.commit();
+  }
 }
 
 export async function seedInitialStoreData(_adminUid: string): Promise<void> {
-  // Step 1: Categories (create only missing docs so existing immutable createdAt is never touched)
+  // Step 1: Categories on 'catalog' role database
   try {
-    const existingCatSnap = await getDocs(collection(db, 'categories'));
+    const catalogDb = getDatabase('catalog');
+    const existingCatSnap = await getDocs(collection(catalogDb, 'categories'));
     const existingCatIds = new Set(existingCatSnap.docs.map((d) => d.id));
     const missingCategories = STARTER_CATEGORIES.filter((cat) => !existingCatIds.has(cat.id));
     if (missingCategories.length > 0) {
-      const catBatch = writeBatch(db);
+      const catBatch = writeBatch(catalogDb);
       for (const cat of missingCategories) {
-        catBatch.set(doc(db, 'categories', cat.id), {
+        catBatch.set(doc(catalogDb, 'categories', cat.id), {
           ...cat,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -159,12 +174,16 @@ export async function seedInitialStoreData(_adminUid: string): Promise<void> {
       await catBatch.commit();
     }
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      return;
+    }
     handleFirestoreError(error, OperationType.CREATE, 'categories');
   }
 
-  // Step 2: Store Settings (create if missing, or migrate legacy storeName safely)
+  // Step 2: Store Settings on 'admin' role database
   try {
-    const settingsRef = doc(db, 'settings', 'store');
+    const adminDb = getDatabase('admin');
+    const settingsRef = doc(adminDb, 'settings', 'store');
     const settingsSnap = await getDoc(settingsRef);
     if (!settingsSnap.exists()) {
       await setDoc(settingsRef, {
@@ -180,6 +199,9 @@ export async function seedInitialStoreData(_adminUid: string): Promise<void> {
       });
     }
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      return;
+    }
     handleFirestoreError(error, OperationType.WRITE, 'settings/store');
   }
 }

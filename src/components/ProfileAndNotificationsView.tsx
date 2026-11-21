@@ -1,8 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { User } from 'firebase/auth';
-import { doc, getDoc, serverTimestamp, updateDoc, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { Bell, Check, LogOut, ShieldCheck } from 'lucide-react';
-import { clampStr, db, handleFirestoreError, isVerifiedCustomer, OperationType } from '../firebase';
+import {
+  clampStr,
+  getDatabase,
+  handleFirestoreError,
+  isVerifiedCustomer,
+  OperationType,
+  updateDocument,
+} from '../firebase';
 import { formatBDT, formatTimestamp, ORDER_STATUS_LABELS } from '../lib/format';
 import { AppNotification, DeliverySpeed, Order, UserPrivateProfile } from '../types';
 import { AuthPanel } from './AuthPanel';
@@ -60,10 +67,11 @@ export const ProfileAndNotificationsView: React.FC<ProfileAndNotificationsViewPr
     setSaving(true);
     setSavedNotice(false);
     try {
-      const userRef = doc(db, 'users', currentUser.uid);
+      const usersDb = getDatabase('users');
+      const userRef = doc(usersDb, 'users', currentUser.uid);
       const userSnap = await getDoc(userRef);
       const cleanName = clampStr(displayName || 'গ্রাহক', 100);
-      const batch = writeBatch(db);
+      const batch = writeBatch(usersDb);
       if (!userSnap.exists()) {
         batch.set(userRef, {
           uid: currentUser.uid,
@@ -80,7 +88,7 @@ export const ProfileAndNotificationsView: React.FC<ProfileAndNotificationsViewPr
       }
 
       batch.set(
-        doc(db, 'users', currentUser.uid, 'private', 'profile'),
+        doc(usersDb, 'users', currentUser.uid, 'private', 'profile'),
         {
           userId: currentUser.uid,
           email: clampStr(currentUser.email || '', 160),
@@ -106,7 +114,13 @@ export const ProfileAndNotificationsView: React.FC<ProfileAndNotificationsViewPr
   const handleMarkRead = async (notif: AppNotification) => {
     if (notif.read) return;
     try {
-      await updateDoc(doc(db, 'notifications', notif.id), { read: true });
+      await updateDocument(
+        'users',
+        'notifications',
+        notif.id,
+        { read: true },
+        { includeUpdatedAt: false }
+      );
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `notifications/${notif.id}`);
     }
@@ -115,9 +129,10 @@ export const ProfileAndNotificationsView: React.FC<ProfileAndNotificationsViewPr
   const handleMarkAllRead = async () => {
     const unread = notifications.filter((n) => !n.read);
     if (unread.length === 0) return;
-    const batch = writeBatch(db);
+    const usersDb = getDatabase('users');
+    const batch = writeBatch(usersDb);
     unread.forEach((n) => {
-      batch.update(doc(db, 'notifications', n.id), { read: true });
+      batch.update(doc(usersDb, 'notifications', n.id), { read: true });
     });
     try {
       await batch.commit();

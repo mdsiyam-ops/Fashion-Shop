@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { User } from 'firebase/auth';
-import { deleteDoc, doc, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import { doc, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
 import {
   BarChart3,
   Check,
   Copy,
+  Database,
   Download,
   Edit3,
   FolderKanban,
@@ -18,7 +19,18 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { clampStr, db, handleFirestoreError, OperationType, sanitizeId, toSlug } from '../firebase';
+import {
+  addDocument,
+  clampStr,
+  deleteDocument,
+  getDatabase,
+  handleFirestoreError,
+  isSameDatabaseForRoles,
+  OperationType,
+  sanitizeId,
+  toSlug,
+  updateDocument,
+} from '../firebase';
 import {
   formatBDT,
   formatTimestamp,
@@ -34,6 +46,7 @@ import {
   STUDIO_IMAGE_GALLERY,
 } from '../lib/seedData';
 import { Category, Order, OrderStatus, Product, StoreSettings } from '../types';
+import { FirebaseConnectionsSection } from './FirebaseConnectionsSection';
 import { ResilientImage } from './ResilientImage';
 
 interface AdminDashboardProps {
@@ -47,7 +60,7 @@ interface AdminDashboardProps {
   onRequireAuth: () => void;
 }
 
-type AdminSection = 'reports' | 'inventory' | 'categories' | 'orders' | 'social';
+type AdminSection = 'reports' | 'inventory' | 'categories' | 'orders' | 'social' | 'firebase';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   currentUser,
@@ -320,17 +333,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     try {
       await ensureCategoryInFirestore(cat);
       if (editingProductId) {
-        await updateDoc(doc(db, 'products', id), basePayload);
+        await updateDocument('catalog', 'products', id, basePayload);
         setProductSuccessMsg('পণ্যটি সফলভাবে আপডেট হয়ে ওয়েবসাইটে প্রকাশিত হয়েছে।');
       } else {
-        await setDoc(doc(db, 'products', id), {
-          id,
-          ...basePayload,
-          ratingAvg: 5.0,
-          reviewCount: 0,
-          soldCount: 0,
-          createdAt: serverTimestamp(),
-        });
+        await addDocument(
+          'catalog',
+          'products',
+          {
+            id,
+            ...basePayload,
+            ratingAvg: 5.0,
+            reviewCount: 0,
+            soldCount: 0,
+            createdAt: serverTimestamp(),
+          },
+          { documentId: id }
+        );
         setProductSuccessMsg('নতুন পণ্যটি সফলভাবে যুক্ত হয়ে ওয়েবসাইটে প্রকাশিত হয়েছে।');
       }
       setShowProductForm(false);
@@ -349,7 +367,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const newPrice = Math.max(0, Number(draft.price) || p.price);
     const newStock = Math.max(0, Math.floor(Number(draft.stock) || 0));
     try {
-      await updateDoc(doc(db, 'products', p.id), {
+      await updateDocument('catalog', 'products', p.id, {
         price: newPrice,
         stock: newStock,
         updatedAt: serverTimestamp(),
@@ -368,7 +386,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleDeleteProduct = async (productId: string) => {
     try {
-      await deleteDoc(doc(db, 'products', productId));
+      await deleteDocument('catalog', 'products', productId);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `products/${productId}`);
     }
@@ -385,9 +403,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         // ignore storage errors
       }
       if (hasFirestoreProducts) {
-        const batch = writeBatch(db);
+        const catalogDb = getDatabase('catalog');
+        const batch = writeBatch(catalogDb);
         demoProds.forEach((p) => {
-          batch.delete(doc(db, 'products', p.id));
+          batch.delete(doc(catalogDb, 'products', p.id));
         });
         await batch.commit();
       }
@@ -406,21 +425,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const id = editingCatId || sanitizeId(`cat_${Date.now()}`);
     try {
       if (editingCatId) {
-        await updateDoc(doc(db, 'categories', id), {
+        await updateDocument('catalog', 'categories', id, {
           name: clampStr(catName, 80),
           slug: toSlug(catName),
           description: clampStr(catDesc, 300),
           updatedAt: serverTimestamp(),
         });
       } else {
-        await setDoc(doc(db, 'categories', id), {
-          id,
-          name: clampStr(catName, 80),
-          slug: toSlug(catName),
-          description: clampStr(catDesc, 300),
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+        await addDocument(
+          'catalog',
+          'categories',
+          {
+            id,
+            name: clampStr(catName, 80),
+            slug: toSlug(catName),
+            description: clampStr(catDesc, 300),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          },
+          { documentId: id }
+        );
       }
       setCatName('');
       setCatDesc('');
@@ -432,7 +456,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleDeleteCategory = async (catId: string) => {
     try {
-      await deleteDoc(doc(db, 'categories', catId));
+      await deleteDocument('catalog', 'categories', catId);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `categories/${catId}`);
     }
@@ -444,20 +468,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const nextNote = clampStr(draft?.note ?? order.courierNote, 300);
 
     setUpdatingOrderId(order.id);
-    const batch = writeBatch(db);
-    batch.update(doc(db, 'orders', order.id), {
-      status: nextStatus,
-      courierNote: nextNote,
-      updatedAt: serverTimestamp(),
-    });
-    batch.update(doc(db, 'orderTracking', order.trackingCode), {
-      status: nextStatus,
-      courierNote: nextNote,
-      updatedAt: serverTimestamp(),
-    });
-
+    const txDb = getDatabase('transactions');
     const notifId = `notif_status_${Date.now()}`;
-    batch.set(doc(db, 'notifications', notifId), {
+    const notifPayload = {
       id: notifId,
       recipientId: order.userId,
       title: `অর্ডার আপডেট: ${ORDER_STATUS_LABELS[nextStatus]}`,
@@ -466,10 +479,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       relatedOrderId: order.id,
       read: false,
       createdAt: serverTimestamp(),
-    });
+    };
 
     try {
-      await batch.commit();
+      const txBatch = writeBatch(txDb);
+      txBatch.update(doc(txDb, 'orders', order.id), {
+        status: nextStatus,
+        courierNote: nextNote,
+        updatedAt: serverTimestamp(),
+      });
+      txBatch.update(doc(txDb, 'orderTracking', order.trackingCode), {
+        status: nextStatus,
+        courierNote: nextNote,
+        updatedAt: serverTimestamp(),
+      });
+
+      if (isSameDatabaseForRoles('transactions', 'users')) {
+        txBatch.set(doc(txDb, 'notifications', notifId), notifPayload);
+        await txBatch.commit();
+      } else {
+        await txBatch.commit();
+        try {
+          await addDocument('users', 'notifications', notifPayload, {
+            documentId: notifId,
+            includeUpdatedAt: false,
+          });
+        } catch (notifErr) {
+          console.warn('Cross-project notification delivery skipped:', notifErr);
+        }
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `orders/${order.id}`);
     } finally {
@@ -481,7 +519,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     e.preventDefault();
     setSavedSettingsFlag(false);
     try {
-      await setDoc(doc(db, 'settings', 'store'), {
+      const adminDb = getDatabase('admin');
+      await setDoc(doc(adminDb, 'settings', 'store'), {
         id: 'store',
         storeName: clampStr(storeNameInput, 100),
         tagline: clampStr(taglineInput, 200),
@@ -540,6 +579,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     { id: 'categories', label: 'ক্যাটাগরি', icon: <FolderKanban className="w-4 h-4" /> },
     { id: 'orders', label: 'অর্ডার ও ডেলিভারি', icon: <ShoppingCart className="w-4 h-4" /> },
     { id: 'social', label: 'ফেসবুক ও সেটিংস', icon: <Share2 className="w-4 h-4" /> },
+    { id: 'firebase', label: 'ফায়ারবেস সংযোগ', icon: <Database className="w-4 h-4" /> },
   ];
 
   const productsById = useMemo(() => {
@@ -1524,6 +1564,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </form>
             </div>
           )}
+
+          {/* 6. MULTI-FIREBASE CONNECTIONS & ROLE MAPPING */}
+          {section === 'firebase' && <FirebaseConnectionsSection />}
         </main>
       </div>
     </div>

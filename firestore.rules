@@ -177,7 +177,7 @@ service cloud.firestore {
           'shippingAddress', 'city', 'postalCode', 'items', 'subtotal',
           'deliveryFee', 'totalAmount', 'deliverySpeed', 'paymentMethod',
           'paymentStatus', 'paymentReference', 'status', 'courierNote',
-          'source', 'createdAt', 'updatedAt'
+          'source', 'idempotencyKey', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.id)
         && isValidTrackingCode(data.trackingCode)
@@ -198,6 +198,7 @@ service cloud.firestore {
         && data.status in ['pending', 'confirmed', 'packed', 'shipped', 'delivered', 'cancelled']
         && data.courierNote is string && data.courierNote.size() <= 300
         && data.source in ['web', 'fb_shop_now']
+        && (!('idempotencyKey' in data) || (data.idempotencyKey is string && data.idempotencyKey.size() <= 128))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -510,6 +511,10 @@ service cloud.firestore {
         && incoming().uid == adminUid
         && incoming().createdAt == request.time;
       allow delete: if isValidId(adminUid) && isBootstrappedAdmin();
+    }
+    match /test/connection {
+      allow get: if isSignedIn();
+      allow list, write: if false;
     }
   }
 }

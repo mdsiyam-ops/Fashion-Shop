@@ -19,6 +19,7 @@ interface StorefrontProps {
   products: Product[];
   productsLoaded: boolean;
   firestoreIssue?: 'quota' | 'network' | null;
+  quotaUpgradeUrl?: string;
   onRetryConnection?: () => void;
   categories: Category[];
   reviews: Review[];
@@ -34,6 +35,7 @@ export const Storefront: React.FC<StorefrontProps> = ({
   products,
   productsLoaded,
   firestoreIssue = null,
+  quotaUpgradeUrl,
   onRetryConnection,
   categories,
   reviews,
@@ -339,18 +341,31 @@ export const Storefront: React.FC<StorefrontProps> = ({
             </p>
             <p className="text-sm text-zinc-600 max-w-md mx-auto leading-relaxed">
               {firestoreIssue === 'quota'
-                ? 'Firebase Firestore-এর আজকের ফ্রি রিড কোটা পূর্ণ হয়ে গেছে। কোটা রিসেট হলে অথবা প্ল্যান আপগ্রেড করলে সকল পণ্য পুনরায় প্রদর্শিত হবে।'
+                ? 'Firebase Firestore-এর আজকের ফ্রি ডেইলি রিড কোটা পূর্ণ হয়ে গেছে। আগামীকাল কোটা রিসেট হবে, অথবা Firebase Console থেকে প্ল্যান আপগ্রেড করতে পারেন।'
                 : 'ইন্টারনেট সংযোগ পরীক্ষা করুন অথবা পুনরায় চেষ্টা করুন।'}
             </p>
-            {onRetryConnection && (
-              <button
-                type="button"
-                onClick={onRetryConnection}
-                className="px-4 py-2 bg-zinc-950 text-white text-xs font-semibold rounded-lg hover:bg-zinc-800 cursor-pointer"
-              >
-                আবার চেষ্টা করুন
-              </button>
-            )}
+            <div className="flex flex-wrap items-center justify-center gap-2.5">
+              {firestoreIssue === 'quota' && quotaUpgradeUrl && (
+                <a
+                  href={quotaUpgradeUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-600 text-white text-xs font-semibold rounded-lg hover:bg-amber-700"
+                >
+                  <span>Firebase Console-এ কোটা দেখুন</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              )}
+              {onRetryConnection && (
+                <button
+                  type="button"
+                  onClick={onRetryConnection}
+                  className="px-4 py-2 bg-zinc-950 text-white text-xs font-semibold rounded-lg hover:bg-zinc-800 cursor-pointer"
+                >
+                  আবার চেষ্টা করুন
+                </button>
+              )}
+            </div>
           </div>
         ) : filteredProducts.length === 0 ? (
           <div className="bg-white border border-zinc-200 rounded-xl p-12 text-center space-y-3">

@@ -1,45 +1,45 @@
-import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, User } from 'firebase/auth';
+import { doc, getDocFromServer } from 'firebase/firestore';
 import {
-  doc,
-  Firestore,
-  getDocFromServer,
-  getFirestore,
-  initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
-} from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+  addDocument,
+  deleteDocument,
+  getDatabase,
+  getDatabaseForProject,
+  getDocument,
+  getFirebaseApp,
+  isSameDatabaseForRoles,
+  listenToCollection,
+  listenToDocument,
+  queryDocuments,
+  testProjectConnection,
+  updateDocument,
+  type DatabaseRole,
+} from './lib/multiFirebaseManager';
 
-const app = initializeApp(firebaseConfig);
-
-function createFirestoreInstance(): Firestore {
-  try {
-    return initializeFirestore(
-      app,
-      {
-        experimentalAutoDetectLongPolling: true,
-        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-      },
-      firebaseConfig.firestoreDatabaseId
-    );
-  } catch {
-    try {
-      return initializeFirestore(
-        app,
-        { experimentalAutoDetectLongPolling: true },
-        firebaseConfig.firestoreDatabaseId
-      );
-    } catch {
-      return getFirestore(app, firebaseConfig.firestoreDatabaseId);
-    }
-  }
-}
-
-export const db = createFirestoreInstance();
-export const auth = getAuth(app);
+// Primary Firebase App (Project 1) handles Authentication and acts as default fallback DB
+const primaryApp = getFirebaseApp('project_1');
+export const db = getDatabaseForProject('project_1');
+export const auth = getAuth(primaryApp);
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.addScope('email');
+googleProvider.addScope('profile');
 googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+export {
+  addDocument,
+  deleteDocument,
+  getDatabase,
+  getDatabaseForProject,
+  getDocument,
+  getFirebaseApp,
+  isSameDatabaseForRoles,
+  listenToCollection,
+  listenToDocument,
+  queryDocuments,
+  testProjectConnection,
+  updateDocument,
+  type DatabaseRole,
+};
 
 export const ADMIN_EMAIL = 'mdsiyam32112@gmail.com';
 
@@ -119,7 +119,7 @@ export async function testConnection(): Promise<void> {
   }
 }
 
-testConnection();
+void testConnection();
 
 // Blueprint synchronization helpers (enforces maxLength & ID patterns before Firestore writes)
 export function clampStr(val: string, maxLen: number): string {
